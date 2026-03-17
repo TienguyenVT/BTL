@@ -1,0 +1,34 @@
+# ==============================================================================
+# IoMT Web Dashboard - Spring Boot Configuration
+# ==============================================================================
+
+spring:
+  application:
+    name: iomt-web-dashboard
+
+  # ── MongoDB Configuration ─────────────────────────────────────────────
+  # Kết nối cùng database với Python module (iot-ingestion)
+  # Chỉ ĐỌC collection "clean_health_data" do Python module ghi vào
+  data:
+    mongodb:
+      uri: mongodb://localhost:27017/iomt_health_monitor
+      database: iomt_health_monitor
+
+# ── Server Configuration ──────────────────────────────────────────────
+server:
+  port: 8080                # Port khác với Python module (8000)
+
+# ── SpringDoc / Swagger UI ────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+
+# ── Logging ───────────────────────────────────────────────────────────
+logging:
+  level:
+    root: INFO
+    com.iomt.dashboard: DEBUG
+    org.springframework.data.mongodb: INFO

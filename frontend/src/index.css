@@ -1,0 +1,44 @@
+/* ==============================================================================
+ * Tailwind CSS Directives + Global Styles
+ * ============================================================================== */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base Styles ─────────────────────────────────────────────────────────── */
+@layer base {
+  body {
+    @apply font-sans text-gray-800 dark:text-gray-200 antialiased;
+  }
+
+  h1, h2, h3 {
+    @apply font-semibold;
+  }
+}
+
+/* ── Component Styles (tái sử dụng) ─────────────────────────────────────── */
+@layer components {
+  /* Card chung cho Dashboard */
+  .card {
+    @apply bg-white dark:bg-gray-800 rounded-2xl shadow-md
+           border border-gray-100 dark:border-gray-700
+           p-4 sm:p-6
+           transition-all duration-300 ease-in-out
+           hover:shadow-lg;
+  }
+
+  /* Badge trạng thái sức khỏe */
+  .badge-normal {
+    @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+           px-3 py-1 rounded-full text-xs font-medium;
+  }
+  .badge-stress {
+    @apply bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200
+           px-3 py-1 rounded-full text-xs font-medium;
+  }
+  .badge-fever {
+    @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200
+           px-3 py-1 rounded-full text-xs font-medium;
+  }
+}
