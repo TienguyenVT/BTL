@@ -1,0 +1,149 @@
+[
+    {
+        "id": "e2f1d4b6.91b5c",
+        "type": "tab",
+        "label": "HiveMQ to MongoDB",
+        "disabled": false,
+        "info": "Luồng Node-RED kéo dữ liệu từ HiveMQ Cloud và lưu vào MongoDB. BĐảm bảo đã cài module node-red-contrib-mongodb4."
+    },
+    {
+        "id": "mqtt_in_node",
+        "type": "mqtt in",
+        "z": "e2f1d4b6.91b5c",
+        "name": "HiveMQ Data",
+        "topic": "ptit/health/data",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "hivemq_broker",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 140,
+        "wires": [
+            [
+                "json_parse_node"
+            ]
+        ]
+    },
+    {
+        "id": "json_parse_node",
+        "type": "json",
+        "z": "e2f1d4b6.91b5c",
+        "name": "Parse JSON",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 350,
+        "y": 140,
+        "wires": [
+            [
+                "mongodb_out_node",
+                "debug_node"
+            ]
+        ]
+    },
+    {
+        "id": "debug_node",
+        "type": "debug",
+        "z": "e2f1d4b6.91b5c",
+        "name": "Debug Output",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 580,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "mongodb_out_node",
+        "type": "mongodb4",
+        "z": "e2f1d4b6.91b5c",
+        "clientNode": "mongo_client",
+        "mode": "collection",
+        "collection": "realtime_health_data",
+        "operation": "insertOne",
+        "output": "toArray",
+        "maxTimeMS": "0",
+        "handleDocId": false,
+        "name": "Save to MongoDB",
+        "x": 590,
+        "y": 200,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "comment_node",
+        "type": "comment",
+        "z": "e2f1d4b6.91b5c",
+        "name": "Lưu ý cài đặt Username/Password",
+        "info": "Nhấn đúp vào node 'HiveMQ Data' -> Bấm hình cây bút ở HiveMQ Cloud Broker -> Chuyển sang Tab Security và nhập lại:\\nUsername: Ptit1234\\nPassword: Ptit1234\\n(Node-RED tự xoá pass khi export)",
+        "x": 200,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "hivemq_broker",
+        "type": "mqtt-broker",
+        "name": "HiveMQ Cloud",
+        "broker": "6b09ec30252741efa972f3f845ce726d.s1.eu.hivemq.cloud",
+        "port": "8883",
+        "tls": "tls_config",
+        "clientid": "nodered_client_ptit",
+        "autoConnect": true,
+        "usetls": true,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthPayload": "",
+        "closeTopic": "",
+        "closeQos": "0",
+        "closePayload": "",
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "tls_config",
+        "type": "tls-config",
+        "name": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "servername": "",
+        "verifyservercert": true,
+        "alpnprotocol": ""
+    },
+    {
+        "id": "mongo_client",
+        "type": "mongodb4-client",
+        "name": "Local MongoDB",
+        "protocol": "mongodb",
+        "hostname": "127.0.0.1",
+        "port": "27017",
+        "dbName": "iomt_health_monitor",
+        "appName": "",
+        "authSource": "",
+        "authMechanism": "DEFAULT",
+        "tls": false,
+        "tlsInsecure": false,
+        "tlsCAFile": "",
+        "tlsCertificateKeyFile": "",
+        "tlsAllowInvalidCertificates": false,
+        "tlsAllowInvalidHostnames": false,
+        "uri": "mongodb://127.0.0.1:27017/iomt_health_monitor"
+    }
+]

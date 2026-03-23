@@ -45,3 +45,31 @@ export interface HealthChartProps {
   title: string;            // Tiêu đề biểu đồ
   color: string;            // Màu đường line
 }
+
+/** ─────────────────────────────────────────────────────────────
+ * DIARY — Sổ tay sức khỏe cá nhân
+ *───────────────────────────────────────────────────────────── */
+
+/** Ghi chú sức khỏe cá nhân */
+export interface DiaryNote {
+  id?: string;
+  title: string;
+  content: string;
+  createdAt?: string;
+}
+
+/** DTO gửi lên API (create/update) */
+export interface DiaryDto {
+  id?: string;
+  title: string;
+  content: string;
+  createdAt?: string;
+}
+
+/** Props cho modal thêm/sửa ghi chú */
+export interface DiaryModalProps {
+  mode: 'create' | 'edit';
+  note?: DiaryNote;
+  onClose: () => void;
+  onSaved: () => void;
+}

@@ -75,4 +75,49 @@ export const getRecentHealthData = async (
   return response.data;
 };
 
+// ═══════════════════════════════════════════════════════════════════════
+// DIARY — Sổ tay sức khỏe cá nhân
+// ═══════════════════════════════════════════════════════════════════════
+
+import { DiaryNote } from '../types';
+
+/**
+ * Lấy danh sách ghi chú.
+ * Endpoint: GET /api/diary-notes
+ * Header:   Authorization: Bearer <token>
+ */
+export const getDiaryNotes = async (): Promise<DiaryNote[]> => {
+  const response = await api.get<DiaryNote[]>('/diary-notes');
+  return response.data;
+};
+
+/**
+ * Tạo ghi chú mới.
+ * Endpoint: POST /api/diary-notes
+ */
+export const createDiaryNote = async (data: { title: string; content: string }): Promise<DiaryNote> => {
+  const response = await api.post<DiaryNote>('/diary-notes', data);
+  return response.data;
+};
+
+/**
+ * Cập nhật ghi chú.
+ * Endpoint: PUT /api/diary-notes/{id}
+ */
+export const updateDiaryNote = async (
+  id: string,
+  data: { title: string; content: string }
+): Promise<DiaryNote> => {
+  const response = await api.put<DiaryNote>(`/diary-notes/${id}`, data);
+  return response.data;
+};
+
+/**
+ * Xóa ghi chú.
+ * Endpoint: DELETE /api/diary-notes/{id}
+ */
+export const deleteDiaryNote = async (id: string): Promise<void> => {
+  await api.delete(`/diary-notes/${id}`);
+};
+
 export default api;

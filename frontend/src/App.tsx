@@ -1,18 +1,17 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
+import DiaryPage from './pages/DiaryPage';
 
 /**
  * Root Component - Cấu hình routing cho ứng dụng.
  *
  * Routes:
  *   /dashboard  → Trang Dashboard chính
- *   /           → Redirect về /dashboard
+ *   /diary     → Trang Sổ tay sức khỏe
+ *   /          → Redirect về /dashboard
  *
- * Có thể mở rộng thêm:
- *   /login      → Trang đăng nhập
- *   /history    → Trang xem lịch sử chi tiết
- *   /settings   → Trang cài đặt
+ * Layout có thể mở rộng sau bằng Sidebar/Navbar.
  */
 const App: React.FC = () => {
   return (
@@ -20,6 +19,9 @@ const App: React.FC = () => {
       <Routes>
         {/* Trang Dashboard chính */}
         <Route path="/dashboard" element={<Dashboard />} />
+
+        {/* Trang Sổ tay sức khỏe */}
+        <Route path="/diary" element={<DiaryPage />} />
 
         {/* Redirect trang chủ về Dashboard */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />

@@ -1,0 +1,1177 @@
+{
+  "info": {
+    "name": "IoMT Dashboard API",
+    "description": "## IoMT Health Monitoring System — Backend Spring Boot\n\n### Kiến trúc: 24 file Java\n```\nsrc/main/java/com/iomt/dashboard/\n├── DashboardApplication.java\n│\n├── config/                          (3 file)\n│   ├── SecurityConfig.java          — Spring Security + CORS\n│   ├── JwtTokenProvider.java         — Sinh & xác minh JWT\n│   └── JwtAuthFilter.java           — Filter đọc JWT từ header\n│\n└── components/                      (21 file)\n    ├── auth/       (4) — Đăng ký / Đăng nhập\n    │   ├── AuthEntity.java\n    │   ├── AuthService.java\n    │   ├── AuthController.java\n    │   └── AuthDto.java              ← gộp Register+Login+Response\n    │\n    ├── profile/    (3) — Thông tin cá nhân (R+U)\n    │   ├── ProfileEntity.java\n    │   ├── ProfileService.java\n    │   └── ProfileController.java\n    │\n    ├── device/     (3) — Thiết bị ESP32 (C+R+D)\n    │   ├── DeviceEntity.java\n    │   ├── DeviceService.java\n    │   └── DeviceController.java\n    │\n    ├── dashboard/  (3) — Dashboard (R)\n    │   ├── DashboardEntity.java\n    │   ├── DashboardService.java\n    │   └── DashboardController.java\n    │\n    ├── healthhistory/ (2) — Lịch sử sức khỏe (R paginated)\n    │   ├── HealthHistoryService.java  ← reuse DashboardEntity\n    │   └── HealthHistoryController.java\n    │\n    ├── alert/      (3) — Cảnh báo (R+D)\n    │   ├── AlertEntity.java\n    │   ├── AlertService.java\n    │   └── AlertController.java\n    │\n    └── diary/      (3) — Sổ tay (CRUD gộp)\n        ├── DiaryNote.java\n        ├── DiaryController.java        ← gộp Controller + Service\n        └── DiaryDto.java              ← gộp Request + Response\n```\n\n### 8 Usecase độc lập\n\n| # | Module | CRUD | Mô tả |\n|---|--------|------|--------|\n| 1 | Auth | R+U | Đăng ký tài khoản, đăng nhập nhận JWT |\n| 2 | Profile | R+U | Xem & cập nhật tuổi, chiều cao, cân nặng, BMI |\n| 3 | Device | C+R+D | Thêm, xem, xóa thiết bị ESP32 |\n| 4 | Dashboard | R | Lấy chỉ số sức khỏe mới nhất |\n| 5 | HealthHistory | R | Lịch sử dữ liệu có phân trang & lọc ngày |\n| 6 | Alert | R+D | Xem & xóa cảnh báo Stress/Fever |\n| 7 | Diary | C+R+U+D | CRUD ghi chú sức khỏe cá nhân |\n| 8 | Config | — | System configuration (Security, JWT) |\n\n### Base URL\n`http://localhost:8080/api`\n\n### Cách test nhanh\n1. Import `Postman.json` vào Postman\n2. Chạy **\"1. AUTH > POST /auth/register\"** — tạo tài khoản\n3. Chạy **\"1. AUTH > POST /auth/login\"** — nhận JWT token\n4. Postman tự động lưu `{{authToken}}` vào biến\n5. Chạy các request còn lại (đã dùng `{{authToken}}` trong header)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080/api",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string",
+      "description": "User ID — tự động lưu từ register/login"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string",
+      "description": "JWT token — tự động lưu từ login, dùng trong Bearer Auth"
+    },
+    {
+      "key": "deviceId",
+      "value": "",
+      "type": "string",
+      "description": "Device ID — tự động lưu từ POST /devices"
+    },
+    {
+      "key": "diaryNoteId",
+      "value": "",
+      "type": "string",
+      "description": "Diary note ID — tự động lưu từ POST /diary-notes"
+    },
+    {
+      "key": "alertId",
+      "value": "",
+      "type": "string",
+      "description": "Alert ID"
+    },
+    {
+      "key": "dashboardId",
+      "value": "",
+      "type": "string",
+      "description": "Dashboard record ID — từ GET /dashboard"
+    }
+  ],
+
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
+  },
+
+  "item": [
+
+    {
+      "name": "0. SYSTEM — Kiểm tra hệ thống",
+      "description": "Các endpoint kiểm tra hệ thống. Không yêu cầu xác thực.",
+      "item": [
+        {
+          "name": "GET / — Health check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('Co noi dung tra ve', pm.response.text().length > 0);",
+                  "console.log('Backend dang chay tai: ' + pm.variables.get('baseUrl'));",
+                  "console.log('Response:', pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}",
+              "host": ["{{baseUrl}}"]
+            },
+            "description": "Kiểm tra backend có đang chạy không.\n\n**Response 200:** Thong diep chao mua."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "1. AUTH — Đăng ký & Đăng nhập",
+      "description": "Usecase 1+2: Tao tai khoan moi va dang nhap nhan JWT token.\n\n**LUONG:**\n  1. POST /auth/register — Tao tai khoan (tra ve userId)\n  2. POST /auth/login   — Dang nhap (tra ve token)\n  3. Copy token vao {{authToken}} (tu dong boi test script)\n\n**SAU KHI DANG NHAP:**\n  Tat ca request ben duoi tu dong gui Authorization: Bearer {{authToken}}",
+      "item": [
+        {
+          "name": "POST /auth/register — Đăng ký tài khoản mới",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('userId', jsonData.id);",
+                  "    pm.test('Co id', !!jsonData.id);",
+                  "    pm.test('Co email', !!jsonData.email);",
+                  "    pm.test('Co name', !!jsonData.name);",
+                  "    pm.test('Khong co password trong response', !jsonData.password);",
+                  "    pm.test('Status 201 Created', true);",
+                  "    console.log('Dang ky thanh cong. UserId: ' + jsonData.id);",
+                  "}",
+                  "",
+                  "if (pm.response.code === 409) {",
+                  "    pm.test('Email da ton tai (409 Conflict)', true);",
+                  "    console.log('Email da ton tai. Thu email khac hoac login.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 400) {",
+                  "    pm.test('Du lieu khong hop le (400)', true);",
+                  "    console.log('Loi validation:', pm.response.text());",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test01@example.com\",\n    \"password\": \"SecurePass123!\",\n    \"name\": \"Nguyen Van A\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Tao tai khoan moi.\n\n**Request Body:**\n```json\n{\n    \"email\": \"test01@example.com\",\n    \"password\": \"SecurePass123!\",\n    \"name\": \"Nguyen Van A\"\n}\n```\n\n**Response 201 Created:**\n```json\n{\n    \"id\": \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"email\": \"test01@example.com\",\n    \"name\": \"Nguyen Van A\",\n    \"token\": null\n}\n```\n\n**Response 409:** Email da ton tai.\n**Response 400:** Validation error."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /auth/login — Đăng nhập",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('authToken', jsonData.token);",
+                  "    pm.collectionVariables.set('userId', jsonData.id);",
+                  "",
+                  "    pm.test('Co JWT token', !!jsonData.token && jsonData.token.length > 0);",
+                  "    pm.test('Token bat dau bang eyJ', jsonData.token.startsWith('eyJ'));",
+                  "    pm.test('Co user id', !!jsonData.id);",
+                  "    pm.test('Co email', !!jsonData.email);",
+                  "    pm.test('Co name', !!jsonData.name);",
+                  "    pm.test('Status 200 OK', true);",
+                  "",
+                  "    console.log('=== DANG NHAP THANH CONG ===');",
+                  "    console.log('UserId : ' + jsonData.id);",
+                  "    console.log('Token  : ' + jsonData.token.substring(0, 30) + '...');",
+                  "    console.log('');",
+                  "    console.log('Bac co the chay cac request ben duoi ngay bay gio.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    pm.test('Sai email hoac mat khau (401)', true);",
+                  "    console.log('Dang nhap that bai. Kiem tra email va mat khau.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test01@example.com\",\n    \"password\": \"SecurePass123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Dang nhap va nhan JWT token.\n\n**Request Body:**\n```json\n{\n    \"email\": \"test01@example.com\",\n    \"password\": \"SecurePass123!\"\n}\n```\n\n**Response 200 OK:**\n```json\n{\n    \"id\": \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"email\": \"test01@example.com\",\n    \"name\": \"Nguyen Van A\",\n    \"token\": \"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI2NWYxYTJiM2M0ZDVlNmY3YThiOWMwZDEiLCJpYXQiOjE3MTA4MjQwMDB9.abc123...\"\n}\n```\n\n**Test script tu dong:** Luu token vao {{authToken}} de cac request ben duoi su dung."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "2. PROFILE — Thông tin cá nhân",
+      "description": "Usecase 2: Xem va cap nhat thong tin sinh truc hoc (tuoi, chieu cao, can nang).\n\n**Tinh BMI:** Tu dong tinh BMI = weight(kg) / (height(m))^2\n**Authorization:** Bearer {{authToken}}",
+      "item": [
+        {
+          "name": "GET /profile — Xem thông tin cá nhân",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('Co userId', !!jsonData.userId);",
+                  "pm.test('userId thuoc user hien tai', jsonData.userId === pm.collectionVariables.get('userId'));",
+                  "",
+                  "if (jsonData.age !== null) {",
+                  "    pm.test('Tuoi la so nguyen', Number.isInteger(jsonData.age));",
+                  "    pm.test('Tuoi hop le (0-150)', jsonData.age > 0 && jsonData.age < 150);",
+                  "}",
+                  "if (jsonData.bmi !== null) {",
+                  "    pm.test('BMI la so', typeof jsonData.bmi === 'number');",
+                  "    pm.test('BMI hop le (10-60)', jsonData.bmi > 10 && jsonData.bmi < 60);",
+                  "    console.log('BMI hien tai: ' + jsonData.bmi);",
+                  "}",
+                  "",
+                  "console.log('Profile:', JSON.stringify(jsonData, null, 2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}",
+                "description": "JWT token tu login"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["profile"]
+            },
+            "description": "Lay thong tin ca nhan cua user dang dang nhap.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200 (da co profile):**\n```json\n{\n    \"userId\": \"65f1a2b3c4d5e6f7a8b9c0d1\",\n    \"age\": 25,\n    \"height\": 170.5,\n    \"weight\": 65.0,\n    \"bmi\": 22.4,\n    \"updatedAt\": \"2026-03-23T10:05:00Z\"\n}\n```\n\n**Response 200 (chua co profile):** Tra ve object rong voi cac truong null."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /profile — Cập nhật thông tin cá nhân",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('Co userId', !!jsonData.userId);",
+                  "pm.test('Tuoi da cap nhat', jsonData.age === 26);",
+                  "pm.test('Chieu cao da cap nhat', jsonData.height === 171.0);",
+                  "pm.test('Can nang da cap nhat', jsonData.weight === 66.5);",
+                  "pm.test('BMI duoc tinh lai', jsonData.bmi !== null);",
+                  "pm.test('Co updatedAt', !!jsonData.updatedAt);",
+                  "",
+                  "// Kiem tra tinh dung dan cua BMI",
+                  "if (jsonData.bmi && jsonData.height && jsonData.weight) {",
+                  "    var expectedBMI = jsonData.weight / Math.pow(jsonData.height / 100, 2);",
+                  "    var diff = Math.abs(jsonData.bmi - expectedBMI);",
+                  "    pm.test('BMI tinh dung', diff < 0.1);",
+                  "    console.log('BMI: ' + jsonData.bmi + ' (expected ~' + expectedBMI.toFixed(2) + ')');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"age\": 26,\n    \"height\": 171.0,\n    \"weight\": 66.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["profile"]
+            },
+            "description": "Cap nhat thong tin sinh truc hoc.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Request Body (tat ca optional — chi cap nhat truong khac null):**\n```json\n{\n    \"age\": 26,\n    \"height\": 171.0,\n    \"weight\": 66.5\n}\n```\n\n**Response 200:**\n```json\n{\n    \"userId\": \"65f1a2b3...\",\n    \"age\": 26,\n    \"height\": 171.0,\n    \"weight\": 66.5,\n    \"bmi\": 22.8,\n    \"updatedAt\": \"2026-03-23T10:10:00Z\"\n}\n```"
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "3. DEVICE — Quản lý thiết bị ESP32",
+      "description": "Usecase 3: Them, xem, xoa thiet bi do ESP32 cua user.\n\n**Authorization:** Bearer {{authToken}}\n\n**LUONG CRUD:**\n  1. POST /devices — Dang ky thiet bi moi\n  2. GET /devices  — Lay danh sach\n  3. DELETE /devices/{id} — Xoa thiet bi",
+      "item": [
+        {
+          "name": "POST /devices — Thêm thiết bị mới",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('deviceId', jsonData.id);",
+                  "",
+                  "    pm.test('Co id', !!jsonData.id);",
+                  "    pm.test('MAC dung', jsonData.macAddress === 'AA:BB:CC:DD:EE:01');",
+                  "    pm.test('Ten dung', jsonData.name === 'Thiet bi nha tien');",
+                  "    pm.test('Thuoc user hien tai', jsonData.userId === pm.collectionVariables.get('userId'));",
+                  "    pm.test('Co createdAt', !!jsonData.createdAt);",
+                  "",
+                  "    console.log('Them thiet bi thanh cong. DeviceId: ' + jsonData.id);",
+                  "}",
+                  "",
+                  "if (pm.response.code === 409) {",
+                  "    pm.test('MAC da ton tai (409 Conflict)', true);",
+                  "    console.log('MAC da duoc dang ky. Thu MAC khac.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 400) {",
+                  "    pm.test('MAC khong hop le (400)', true);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"macAddress\": \"AA:BB:CC:DD:EE:01\",\n    \"name\": \"Thiet bi nha tien\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices"]
+            },
+            "description": "Dang ky thiet bi ESP32 moi.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Request Body:**\n```json\n{\n    \"macAddress\": \"AA:BB:CC:DD:EE:01\",\n    \"name\": \"Thiet bi nha tien\"\n}\n```\n\n**Response 201 Created:**\n```json\n{\n    \"id\": \"65f1a2b3...\",\n    \"userId\": \"65f1a2b3...\",\n    \"macAddress\": \"AA:BB:CC:DD:EE:01\",\n    \"name\": \"Thiet bi nha tien\",\n    \"createdAt\": \"2026-03-23T10:00:00Z\"\n}\n```\n\n**Response 409:** MAC da duoc dang ky boi user khac."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /devices — Danh sách thiết bị",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('La array', Array.isArray(jsonData));",
+                  "",
+                  "if (jsonData.length > 0) {",
+                  "    var device = jsonData[0];",
+                  "    pm.test('Device co id', !!device.id);",
+                  "    pm.test('Device co macAddress', !!device.macAddress);",
+                  "    pm.test('Device co name', device.name !== undefined);",
+                  "    pm.test('Device thuoc user hien tai', device.userId === pm.collectionVariables.get('userId'));",
+                  "",
+                  "    // Luu deviceId dau tien neu chua co",
+                  "    if (!pm.collectionVariables.get('deviceId') && device.id) {",
+                  "        pm.collectionVariables.set('deviceId', device.id);",
+                  "        console.log('Da luu deviceId: ' + device.id);",
+                  "    }",
+                  "",
+                  "    console.log('So thiet bi: ' + jsonData.length);",
+                  "}",
+                  "",
+                  "if (jsonData.length === 0) {",
+                  "    console.log('Chua co thiet bi nao. Tao moi voi POST /devices.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices"]
+            },
+            "description": "Lay danh sach tat ca thiet bi cua user (moi nhat truoc).\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200:**\n```json\n[\n    {\n        \"id\": \"65f1a2b3...\",\n        \"userId\": \"65f1a2b3...\",\n        \"macAddress\": \"AA:BB:CC:DD:EE:01\",\n        \"name\": \"Thiet bi nha tien\",\n        \"createdAt\": \"2026-03-23T10:00:00Z\"\n    }\n]\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /devices/{id} — Xóa thiết bị",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 204) {",
+                  "    pm.test('Status 204 No Content', true);",
+                  "    pm.collectionVariables.set('deviceId', '');",
+                  "    console.log('Xoa thiet bi thanh cong.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    pm.test('Khong tim thay (404)', true);",
+                  "    console.log('Thiet bi khong ton tai hoac khong thuoc user.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices/{{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "{{deviceId}}"]
+            },
+            "description": "Xoa thiet bi khoi he thong.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 204:** Xoa thanh cong, khong co body.\n**Response 404:** Thiet bi khong ton tai hoac khong thuoc user."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "4. DASHBOARD — Bảng điều khiển",
+      "description": "Usecase 4: Lay du lieu suc khoe moi nhat de hien thi tren Dashboard (chi doc).\n\n**GHI CHU:** Du lieu duoc Python IoT module gui vao MongoDB. Backend chi doc.\n**Authorization:** Bearer {{authToken}}",
+      "item": [
+        {
+          "name": "GET /dashboard — Chỉ số mới nhất",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "    if (jsonData && jsonData.id) {",
+                  "        pm.test('Co id', !!jsonData.id);",
+                  "        pm.test('Co BPM', typeof jsonData.bpm === 'number');",
+                  "        pm.test('Co SpO2', typeof jsonData.spo2 === 'number');",
+                  "        pm.test('Co nhiet do', typeof jsonData.bodyTemp === 'number');",
+                  "        pm.test('Co GSR', typeof jsonData.gsrAdc === 'number');",
+                  "        pm.test('Co label', !!jsonData.label);",
+                  "        pm.test('Label hop le', ['Normal','Stress','Fever'].includes(jsonData.label));",
+                  "        pm.test('Co timestamp', !!jsonData.timestamp);",
+                  "",
+                  "        pm.collectionVariables.set('dashboardId', jsonData.id);",
+                  "",
+                  "        console.log('=== DU LIEU SUC KHOE MOI NHAT ===');",
+                  "        console.log('BPM     : ' + jsonData.bpm);",
+                  "        console.log('SpO2    : ' + jsonData.spo2 + '%');",
+                  "        console.log('Temp    : ' + jsonData.bodyTemp + 'C');",
+                  "        console.log('GSR ADC : ' + jsonData.gsrAdc);",
+                  "        console.log('Label   : ' + jsonData.label);",
+                  "        console.log('Time    : ' + jsonData.timestamp);",
+                  "    } else {",
+                  "        pm.test('Chua co du lieu (null)', jsonData === null || jsonData.id === null);",
+                  "        console.log('Chua co du lieu suc khoe.');",
+                  "        console.log('Can Python IoT module gui du lieu truoc.');",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard"]
+            },
+            "description": "Lay du lieu suc khoe moi nhat cua user.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200 (co du lieu):**\n```json\n{\n    \"id\": \"65f1a2b3...\",\n    \"bpm\": 72.5,\n    \"spo2\": 98.2,\n    \"bodyTemp\": 36.8,\n    \"gsrAdc\": 512.0,\n    \"extTempC\": 28.5,\n    \"extHumidityPct\": 65.0,\n    \"label\": \"Normal\",\n    \"timestamp\": \"2026-03-23T10:00:00Z\"\n}\n```\n\n**Response 200 (chua co du lieu):** `null`"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /dashboard/{id} — Chi tiết 1 bản ghi",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.test('Co day du truong', jsonData.bpm && jsonData.spo2 && jsonData.label);",
+                  "    pm.test('Co id dung', jsonData.id === pm.collectionVariables.get('dashboardId'));",
+                  "}",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    pm.test('Khong tim thay (404)', true);",
+                  "    console.log('ID khong ton tai. Thu GET /dashboard de lay id moi.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/{{dashboardId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "{{dashboardId}}"]
+            },
+            "description": "Lay chi tiet 1 ban ghi suc khoe theo ID.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200:** DashboardDto day du.\n**Response 404:** Khong tim thay."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "5. HEALTH HISTORY — Lịch sử sức khỏe",
+      "description": "Usecase 5: Xem lich su du lieu suc khoe voi phan trang va loc theo ngay.\n\n**CHANH DOC, KHONG SUA/XOA:** Dam bao tinh toan ven du lieu y te.\n**Authorization:** Bearer {{authToken}}",
+      "item": [
+        {
+          "name": "GET /health-history — Danh sách (phân trang)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('Co content array', Array.isArray(jsonData.content));",
+                  "pm.test('Co page', typeof jsonData.page === 'number');",
+                  "pm.test('Co size', typeof jsonData.size === 'number');",
+                  "pm.test('Co totalElements', typeof jsonData.totalElements === 'number');",
+                  "pm.test('Co totalPages', typeof jsonData.totalPages === 'number');",
+                  "pm.test('page mac dinh = 0', jsonData.page === 0);",
+                  "pm.test('size mac dinh = 20', jsonData.size === 20);",
+                  "",
+                  "if (jsonData.content && jsonData.content.length > 0) {",
+                  "    var first = jsonData.content[0];",
+                  "    pm.test('Ban ghi co BPM', typeof first.bpm === 'number');",
+                  "    pm.test('Ban ghi co SpO2', typeof first.spo2 === 'number');",
+                  "    pm.test('Ban ghi co label', !!first.label);",
+                  "    pm.test('Ban ghi co timestamp', !!first.timestamp);",
+                  "    console.log('Trang ' + jsonData.page + ': ' + jsonData.content.length + ' ban ghi');",
+                  "    console.log('Tong: ' + jsonData.totalElements + ' ban ghi / ' + jsonData.totalPages + ' trang');",
+                  "} else {",
+                  "    console.log('Trang nay khong co du lieu.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health-history?page=0&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["health-history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "So trang (0-based)"
+                },
+                {
+                  "key": "size",
+                  "value": "20",
+                  "description": "So ban ghi moi trang"
+                }
+              ]
+            },
+            "description": "Lay lich su suc khoe phan trang (moi nhat truoc).\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Query Params (optional):**\n- page: So trang (0-based, mac dinh: 0)\n- size: So ban ghi/trang (mac dinh: 20)\n\n**Response 200:**\n```json\n{\n    \"content\": [\n        {\n            \"id\": \"65f1a2b3...\",\n            \"bpm\": 72.5,\n            \"spo2\": 98.2,\n            \"bodyTemp\": 36.8,\n            \"gsrAdc\": 512.0,\n            \"label\": \"Normal\",\n            \"timestamp\": \"2026-03-23T10:00:00Z\"\n        }\n    ],\n    \"page\": 0,\n    \"size\": 20,\n    \"totalElements\": 150,\n    \"totalPages\": 8\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health-history — Lọc theo ngày",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('Co content', Array.isArray(jsonData.content));",
+                  "",
+                  "if (jsonData.content && jsonData.content.length > 0) {",
+                  "    var dateFilter = '2026-03-23';",
+                  "    var allInRange = jsonData.content.every(function(item) {",
+                  "        return item.timestamp && item.timestamp.startsWith(dateFilter);",
+                  "    });",
+                  "    pm.test('Tat ca ban ghi deu trong ngay 2026-03-23', allInRange);",
+                  "    console.log('Loc theo ngay 2026-03-23: ' + jsonData.content.length + ' ban ghi');",
+                  "}",
+                  "",
+                  "if (jsonData.content && jsonData.content.length === 0) {",
+                  "    console.log('Khong co du lieu trong ngay 2026-03-23.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health-history?page=0&size=20&date=2026-03-23",
+              "host": ["{{baseUrl}}"],
+              "path": ["health-history"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "date",
+                  "value": "2026-03-23",
+                  "description": "Loc theo ngay (yyyy-MM-dd)"
+                }
+              ]
+            },
+            "description": "Lay lich su suc khoe loc theo ngay cu the.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Query Params:**\n- page: So trang (0-based)\n- size: So ban ghi/trang\n- date: Ngay loc (yyyy-MM-dd)\n\n**Response:** Cu nhu endpoint phan trang, nhung content chi chua du lieu trong ngay duoc chi dinh."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "6. ALERT — Cảnh báo sức khỏe",
+      "description": "Usecase 6: Xem va xoa canh bao Stress/Fever.\n\n**TAO ALERT:** Tu dong boi AI/he thong khi phat hien trang thai bat thuong. User chi xem va xoa.\n**Authorization:** Bearer {{authToken}}",
+      "item": [
+        {
+          "name": "GET /alerts — Danh sách cảnh báo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('La array', Array.isArray(jsonData));",
+                  "",
+                  "if (jsonData.length > 0) {",
+                  "    var alert = jsonData[0];",
+                  "    pm.test('Alert co id', !!alert.id);",
+                  "    pm.test('Co label (Stress/Fever)', alert.label === 'Stress' || alert.label === 'Fever');",
+                  "    pm.test('Co message', !!alert.message);",
+                  "    pm.test('Co timestamp', !!alert.timestamp);",
+                  "    pm.test('Co isRead', alert.isRead !== undefined);",
+                  "",
+                  "    if (!pm.collectionVariables.get('alertId') && alert.id) {",
+                  "        pm.collectionVariables.set('alertId', alert.id);",
+                  "    }",
+                  "    console.log('So canh bao: ' + jsonData.length);",
+                  "    console.log('Dau tien: ' + alert.label + ' - ' + alert.message);",
+                  "}",
+                  "",
+                  "if (jsonData.length === 0) {",
+                  "    console.log('Chua co canh bao nao.');",
+                  "    console.log('Can he thong AI phat hien Stress/Fever de tao alert.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/alerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["alerts"]
+            },
+            "description": "Lay danh sach tat ca canh bao cua user (moi nhat truoc).\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200:**\n```json\n[\n    {\n        \"id\": \"65f1a2b3...\",\n        \"label\": \"Stress\",\n        \"message\": \"Phat hien trang thai Stress luc 10:00 ngay 23/03/2026\",\n        \"timestamp\": \"2026-03-23T10:00:00Z\",\n        \"isRead\": false\n    },\n    {\n        \"id\": \"65f1a2b3...\",\n        \"label\": \"Fever\",\n        \"message\": \"Nhiet do co the cao: 38.5C\",\n        \"timestamp\": \"2026-03-22T15:30:00Z\",\n        \"isRead\": true\n    }\n]\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /alerts/count — Số cảnh báo chưa đọc",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('Co unreadCount', typeof jsonData.unreadCount === 'number');",
+                  "pm.test('unreadCount >= 0', jsonData.unreadCount >= 0);",
+                  "console.log('So canh bao chua doc: ' + jsonData.unreadCount);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/alerts/count",
+              "host": ["{{baseUrl}}"],
+              "path": ["alerts", "count"]
+            },
+            "description": "Dem so canh bao chua doc (hien thi badge tren UI).\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200:**\n```json\n{\n    \"unreadCount\": 3\n}\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /alerts/{id} — Xóa cảnh báo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 204) {",
+                  "    pm.test('Status 204 No Content', true);",
+                  "    pm.collectionVariables.set('alertId', '');",
+                  "    console.log('Xoa canh bao thanh cong.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    pm.test('Khong tim thay (404)', true);",
+                  "    console.log('Canh bao khong ton tai hoac khong thuoc user.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/alerts/{{alertId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["alerts", "{{alertId}}"]
+            },
+            "description": "Xoa 1 canh bao cu the.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 204:** Xoa thanh cong.\n**Response 404:** Canh bao khong ton tai hoac khong thuoc user."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "7. DIARY — Sổ tay sức khỏe",
+      "description": "Usecase 7: CRUD day du cho ghi chu suc khoe ca nhan.\n\n**GOP CONTROLLER + SERVICE:** Logic ngan, de quan ly.\n**Authorization:** Bearer {{authToken}}\n\n**LUONG CRUD:**\n  1. POST   — Tao ghi chu moi\n  2. GET    — Danh sach ghi chu\n  3. GET /{id} — Chi tiet 1 ghi chu\n  4. PUT /{id} — Sua ghi chu\n  5. DELETE /{id} — Xoa ghi chu",
+      "item": [
+        {
+          "name": "POST /diary-notes — Tạo ghi chú mới",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('diaryNoteId', jsonData.id);",
+                  "",
+                  "    pm.test('Co id', !!jsonData.id);",
+                  "    pm.test('Tieu de dung', jsonData.title === 'Hom nay thi cuoi ky');",
+                  "    pm.test('Noi dung dung', jsonData.content.includes('bung no'));",
+                  "    pm.test('Co createdAt', !!jsonData.createdAt);",
+                  "    pm.test('Khong co userId trong response', jsonData.userId === undefined);",
+                  "",
+                  "    console.log('Tao ghi chu thanh cong. ID: ' + jsonData.id);",
+                  "    console.log('Tieu de: ' + jsonData.title);",
+                  "}",
+                  "",
+                  "if (pm.response.code === 400) {",
+                  "    pm.test('Validation error (400)', true);",
+                  "    console.log('Loi validation:', pm.response.text());",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Hom nay thi cuoi ky\",\n    \"content\": \"Cam thay bung no, lo lang vi thi dau tien cua ky thi cuoi nam.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/diary-notes",
+              "host": ["{{baseUrl}}"],
+              "path": ["diary-notes"]
+            },
+            "description": "Tao ghi chu suc khoe moi.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Request Body:**\n```json\n{\n    \"title\": \"Hom nay thi cuoi ky\",\n    \"content\": \"Cam thay bung no, lo lang vi thi dau tien cua ky thi cuoi nam.\"\n}\n```\n\n**Response 201 Created:**\n```json\n{\n    \"id\": \"65f1a2b3...\",\n    \"title\": \"Hom nay thi cuoi ky\",\n    \"content\": \"Cam thay bung no, lo lang...\",\n    \"createdAt\": \"2026-03-23T10:00:00Z\"\n}\n```\n\n**Response 400:** Tieu de hoac noi dung trong."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /diary-notes — Danh sách ghi chú",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.test('Status 200 OK', pm.response.code === 200);",
+                  "pm.test('La array', Array.isArray(jsonData));",
+                  "",
+                  "if (jsonData.length > 0) {",
+                  "    var note = jsonData[0];",
+                  "    pm.test('Ghi chu co id', !!note.id);",
+                  "    pm.test('Ghi chu co title', !!note.title);",
+                  "    pm.test('Ghi chu co content', !!note.content);",
+                  "    pm.test('Ghi chu co createdAt', !!note.createdAt);",
+                  "",
+                  "    if (!pm.collectionVariables.get('diaryNoteId') && note.id) {",
+                  "        pm.collectionVariables.set('diaryNoteId', note.id);",
+                  "    }",
+                  "",
+                  "    console.log('Tong so ghi chu: ' + jsonData.length);",
+                  "}",
+                  "",
+                  "if (jsonData.length === 0) {",
+                  "    console.log('Chua co ghi chu nao. Tao moi voi POST /diary-notes.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/diary-notes",
+              "host": ["{{baseUrl}}"],
+              "path": ["diary-notes"]
+            },
+            "description": "Lay danh sach tat ca ghi chu cua user (moi nhat truoc).\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200:**\n```json\n[\n    {\n        \"id\": \"65f1a2b3...\",\n        \"title\": \"Hom nay thi cuoi ky\",\n        \"content\": \"Cam thay bung no, lo lang...\",\n        \"createdAt\": \"2026-03-23T10:00:00Z\"\n    }\n]\n```"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /diary-notes/{id} — Chi tiết ghi chú",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.test('Co day du truong', jsonData.id && jsonData.title && jsonData.content && jsonData.createdAt);",
+                  "    pm.test('ID dung', jsonData.id === pm.collectionVariables.get('diaryNoteId'));",
+                  "    console.log('Chi tiet ghi chu:', JSON.stringify(jsonData, null, 2));",
+                  "}",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    pm.test('Khong tim thay (404)', true);",
+                  "    console.log('Ghi chu khong ton tai hoac khong thuoc user.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/diary-notes/{{diaryNoteId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["diary-notes", "{{diaryNoteId}}"]
+            },
+            "description": "Lay chi tiet 1 ghi chu theo ID.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 200:** DiaryDto day du.\n**Response 404:** Ghi chu khong ton tai hoac khong thuoc user."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /diary-notes/{id} — Sửa ghi chú",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.test('Status 200 OK', true);",
+                  "    pm.test('Tieu de da cap nhat', jsonData.title === 'Hom nay thi cuoi ky - da cap nhat');",
+                  "    pm.test('Noi dung da cap nhat', jsonData.content.includes('cap nhat'))",
+                  "    pm.test('createdAt khong doi', true);",
+                  "    console.log('Cap nhat ghi chu thanh cong.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    pm.test('Khong tim thay (404)', true);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Hom nay thi cuoi ky - da cap nhat\",\n    \"content\": \"Cam thay bung no, lo lang... Da cap nhat: thi xong roi, cam thay nhe nhom hon.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/diary-notes/{{diaryNoteId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["diary-notes", "{{diaryNoteId}}"]
+            },
+            "description": "Cap nhat ghi chu suc khoe.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Request Body (cac truong optional — chi cap nhat truong khac null):**\n```json\n{\n    \"title\": \"Hom nay thi cuoi ky - da cap nhat\",\n    \"content\": \"Da cap nhat noi dung...\"\n}\n```\n\n**Response 200:** DiaryDto da cap nhat.\n**Response 404:** Ghi chu khong ton tai hoac khong thuoc user."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /diary-notes/{id} — Xóa ghi chú",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 204) {",
+                  "    pm.test('Status 204 No Content', true);",
+                  "    pm.collectionVariables.set('diaryNoteId', '');",
+                  "    console.log('Xoa ghi chu thanh cong.');",
+                  "}",
+                  "",
+                  "if (pm.response.code === 404) {",
+                  "    pm.test('Khong tim thay (404)', true);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/diary-notes/{{diaryNoteId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["diary-notes", "{{diaryNoteId}}"]
+            },
+            "description": "Xoa 1 ghi chu suc khoe.\n\n**Header:** Authorization: Bearer {{authToken}}\n\n**Response 204:** Xoa thanh cong.\n**Response 404:** Ghi chu khong ton tai hoac khong thuoc user."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "TEST SEQUENCE — Chuỗi test tự động",
+      "description": "Chay tu dong toan bo he thong theo thu tu.\n\n**HUONG DAN CHAY:**\n  1. Import Postman.json vao Postman\n  2. Mo \"TEST SEQUENCE > Chay toan bo\"\n  3. Click \"Send\" — he thong tu dong:\n     - Reset tat ca bien\n     - Chay lan luot: Register -> Login -> Profile -> Device -> Diary\n     - Kiem tra ket qua moi buoc\n\n**LUU Y:**\n  - Phai chay \"1. AUTH > POST /auth/login\" truoc de lay token\n  - Cac request ben duoi deu can Bearer {{authToken}}\n  - Su dung \"Run collection\" de chay nhieu lan lien tiep",
+      "item": [
+        {
+          "name": "CHẠY TOÀN BỘ — Auto test all modules",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "// Reset tat ca bien",
+                  "pm.collectionVariables.set('userId', '');",
+                  "pm.collectionVariables.set('authToken', '');",
+                  "pm.collectionVariables.set('deviceId', '');",
+                  "pm.collectionVariables.set('diaryNoteId', '');",
+                  "pm.collectionVariables.set('alertId', '');",
+                  "pm.collectionVariables.set('dashboardId', '');",
+                  "",
+                  "console.log('==========================================');",
+                  "console.log('   IoMT API — CHAY TU DONG');",
+                  "console.log('==========================================');",
+                  "console.log('');",
+                  "console.log('Thu tu thuc hien:');",
+                  "console.log('  [1] POST   /auth/register');",
+                  "console.log('  [2] POST   /auth/login      <- LAY TOKEN');",
+                  "console.log('  [3] GET    /profile');",
+                  "console.log('  [4] PUT    /profile');",
+                  "console.log('  [5] POST   /devices');",
+                  "console.log('  [6] GET    /devices');",
+                  "console.log('  [7] GET    /dashboard');",
+                  "console.log('  [8] GET    /health-history');",
+                  "console.log('  [9] GET    /alerts');",
+                  "console.log(' [10] POST   /diary-notes');",
+                  "console.log(' [11] GET    /diary-notes');",
+                  "console.log(' [12] PUT    /diary-notes');",
+                  "console.log(' [13] DELETE /diary-notes');",
+                  "console.log(' [14] DELETE /devices');",
+                  "console.log('');",
+                  "console.log('CHAY TAY: Chay tung request theo thu tu tren.');",
+                  "console.log('AUTOMATION: Su dung Runner -> Run all requests.');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "console.log('');",
+                  "console.log('==========================================');",
+                  "console.log('   KET QUA: ' + pm.response.code + ' ' + pm.response.status);",
+                  "console.log('==========================================');",
+                  "",
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    console.log('OK - He thong dang hoat dong.');",
+                  "    console.log('Tiep tuc chay cac request con lai theo thu tu.');",
+                  "} else {",
+                  "    console.log('LOI - Kiem tra backend.');",
+                  "    console.log('Response:', pm.response.text());",
+                  "}",
+                  "",
+                  "console.log('');",
+                  "console.log('==========================================');",
+                  "console.log('  HUONG DAN TEST CHI TIET');",
+                  "console.log('==========================================');",
+                  "console.log('');",
+                  "console.log('1. AUTH:');",
+                  "console.log('   a) Chay POST /auth/register');",
+                  "console.log('   b) Chay POST /auth/login (lay token)');",
+                  "console.log('');",
+                  "console.log('2. SAU KHI CO TOKEN:');",
+                  "console.log('   - Collection -> Authorization');",
+                  "console.log('   - Chon Type: Bearer');",
+                  "console.log('   - Token: {{authToken}}');",
+                  "console.log('   - Tat ca request deu tu dong gui token');",
+                  "console.log('');",
+                  "console.log('3. CHAY THU TU:');",
+                  "console.log('   a) 2. PROFILE -> GET /profile');",
+                  "console.log('   b) 2. PROFILE -> PUT /profile');",
+                  "console.log('   c) 3. DEVICE  -> POST /devices');",
+                  "console.log('   d) 3. DEVICE  -> GET /devices');",
+                  "console.log('   e) 4. DASHBOARD -> GET /dashboard');",
+                  "console.log('   f) 5. HEALTH HISTORY -> GET /health-history');",
+                  "console.log('   g) 6. ALERT -> GET /alerts');",
+                  "console.log('   h) 7. DIARY  -> POST /diary-notes');",
+                  "console.log('   i) 7. DIARY  -> GET /diary-notes');",
+                  "console.log('   j) 7. DIARY  -> PUT /diary-notes');",
+                  "console.log('   k) 7. DIARY  -> DELETE /diary-notes');",
+                  "console.log('   l) 3. DEVICE  -> DELETE /devices');",
+                  "console.log('');",
+                  "console.log('4. RUN COLLECTION (automation):');",
+                  "console.log('   Runner -> Chon collection -> Run');",
+                  "console.log('   -> Chay tat ca request theo thu tu tu dong');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}",
+              "host": ["{{baseUrl}}"]
+            },
+            "description": "Huong dan test tu dong. Chay request nay de xem huong dan, sau do chay tung buoc theo thu tu."
+          },
+          "response": []
+        }
+      ]
+    }
+
+  ]
+}

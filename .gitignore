@@ -1,0 +1,121 @@
+# ==============================================================================
+# Git Ignore cho dự án IoMT Health Monitor
+# ==============================================================================
+
+# -------------------- Python --------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# -------------------- Node.js / Frontend --------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# -------------------- Environment Files --------------------
+.env
+.env.local
+.env.*.local
+
+# -------------------- ML Model --------------------
+ml_model/*.pkl
+ml_model/*.joblib
+
+# Ignore training results
+result/
+results/
+
+# Images and output files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+
+# -------------------- Data --------------------
+Data/*.csv
+Data/*.json
+
+# -------------------- ESP-IDF / Build --------------------
+All-in-one/build/
+build/
+.cmake/
+*.o
+*.a
+*.elf
+*.bin
+*.map
+
+# ESP-IDF specific
+sdkconfig
+sdkconfig.old
+*.ninja_log
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+*.ninja_deps
+*.ninja_log
+
+# Bootloader
+bootloader/
+esp-idf/
+
+# -------------------- OS --------------------
+Thumbs.db
+ehthubs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+Icon
+
+# -------------------- MongoDB / Database --------------------
+*.log
+
+# -------------------- Java / Spring Boot --------------------
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+
+# -------------------- Keep these files --------------------
+# Source code
+!backend/
+!frontend/
+!Data/
+!Documents/
+!All-in-one/
+
+# Keep config examples
+!backend/iot-ingestion/.env.example
+
+# Keep documentation
+!Documents/ML_Final_Report.md
+!Documents/ML_Technical_Documentation.md
+!Documents/README.md
+
+# Keep source files
+!backend/iot-ingestion/*.py
+!backend/iot-ingestion/cleaning/*.py
+!backend/iot-ingestion/ml_model/*.py
+!backend/iot-ingestion/requirements.txt
+
+# Keep data generator
+!Data/generate_health_data.py
