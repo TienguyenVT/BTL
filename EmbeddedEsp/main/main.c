@@ -366,20 +366,20 @@ void sensor_task(void *pvParameters) {
     // Chờ đến khi có ít nhất 1 Client kết nối WiFi mới cho phép chạy tiếp
     xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
-    // 1. Collect Batch of 50 samples
+    // 1. Collect Batch of 100 samples (giữ mutex suốt batch để không bị display ngắt quãng)
+    xSemaphoreTake(i2c_mutex, portMAX_DELAY);
     for (int i = 0; i < BATCH_SIZE; i++) {
         while (max30105_available() == false) {
             // Thay vì delay 1ms liên tục, task sẽ "ngủ" chờ ISR đánh thức
             // Giảm cực nhiều tải CPU cho hệ thống
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10)); // Giảm timeout xuống 10ms để tránh rớt mẫu nếu đứt dây INT
-            xSemaphoreTake(i2c_mutex, portMAX_DELAY);
             max30105_check(&sensor);
-            xSemaphoreGive(i2c_mutex);
         }
       rawRed[i] = max30105_getRed();
       rawIr[i] = max30105_getIR();
       max30105_nextSample();
     }
+    xSemaphoreGive(i2c_mutex);
 
     // 2. Gaussian Filtering
     // Calculate Mean & StdDev
@@ -594,7 +594,7 @@ void display_task(void *pvParameters) {
             ssd1306_draw_string(&dev, 0, 7, "de cau hinh WiFi. ");
         } else {
             // === CHẾ ĐỘ HOẠT ĐỘNG BÌNH THƯỜNG ===
-            ssd1306_draw_string(&dev, 0, 0, "-- HEALTH MONITOR --");
+            ssd1306_draw_string(&dev, 0, 0, "HEALTH MONITOR");
             
             if (is_user_present) {
                 snprintf(buf, sizeof(buf), "BPM: %3d SpO2:%3d%%", global_bpm, global_spo2);
