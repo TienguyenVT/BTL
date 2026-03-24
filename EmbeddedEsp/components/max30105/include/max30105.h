@@ -3,11 +3,7 @@
 #include <driver/i2c.h>
 #include <stdbool.h>
 #include <stdint.h>
-
-
-// Define I2C configuration
-#define I2C_MASTER_NUM I2C_NUM_0
-#define MAX30105_ADDRESS 0x57
+#include "max30105_config.h"
 
 typedef struct {
   i2c_port_t i2c_port;
