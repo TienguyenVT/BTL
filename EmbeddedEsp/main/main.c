@@ -12,8 +12,10 @@
 #include "esp_mac.h"
 #include "string.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "mqtt_client.h"
 #include "esp_crt_bundle.h"
+#include "ssd1306.h"
 
 esp_mqtt_client_handle_t mqtt_client = NULL;
 static bool mqtt_started = false;
@@ -56,6 +58,9 @@ static const char *WIFI_TAG = "WIFI_AP";
 EventGroupHandle_t wifi_event_group;
 const int WIFI_CONNECTED_BIT = BIT0;
 
+// Cờ báo ESP đang ở chế độ chờ cấu hình WiFi (SoftAP)
+static bool wifi_waiting_config = false;
+
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_softap.h"
 
@@ -90,6 +95,7 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(WIFI_TAG, "Da ket noi Router Internet thanh cong - IP: " IPSTR, IP2STR(&event->ip_info.ip));
         
         // MỞ KHÓA HOẠT ĐỘNG KHI ĐÃ LÊN MẠNG
+        wifi_waiting_config = false;
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         ESP_LOGW(WIFI_TAG, "=> Da co ket noi Internet. MO CUA cho cac cam bien hoat dong!");
         
@@ -99,12 +105,21 @@ static void wifi_prov_event_handler(void* arg, esp_event_base_t event_base,
             mqtt_started = true;
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(WIFI_TAG, "Mat ket noi mang. Dang thu ket noi lai...");
-        
-        // ĐÓNG KHÓA
+        // ĐÓNG KHÓA cảm biến
         xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        ESP_LOGW(WIFI_TAG, "=> Mat ket noi Internet. DUNG tiep nhan du lieu tu cam bien!");
-        esp_wifi_connect();
+        
+        // Chuyển về chế độ chờ cấu hình SoftAP (không retry liên tục)
+        ESP_LOGW(WIFI_TAG, "Mat ket noi WiFi. Chuyen ve che do SoftAP cho cau hinh lai...");
+        wifi_waiting_config = true;
+        
+        // Xóa thông tin WiFi cũ trong NVS và khởi động lại Provisioning
+        wifi_prov_mgr_config_t config = {
+            .scheme = wifi_prov_scheme_softap,
+            .scheme_event_handler = WIFI_PROV_EVENT_HANDLER_NONE
+        };
+        wifi_prov_mgr_init(config);
+        wifi_prov_mgr_reset_provisioning();
+        wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_0, NULL, "IoMT-PTIT", NULL);
     }
 }
 
@@ -135,8 +150,8 @@ void wifi_init_prov(void) {
     ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
 
     if (!provisioned) {
-        ESP_LOGI(WIFI_TAG, "Thiết bị chưa có cấu hình mạng. Đang phát SoftAP 'IoMT-PTIT' để chờ setup...");
-        // Mở SoftAP tên "IoMT-PTIT", Security 0 cho phép connect phẳng qua App
+        ESP_LOGI(WIFI_TAG, "Thiet bi chua co cau hinh mang. Dang phat SoftAP 'IoMT-PTIT' de cho setup...");
+        wifi_waiting_config = true;
         ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_0, NULL, "IoMT-PTIT", NULL));
     } else {
         ESP_LOGI(WIFI_TAG, "Đã lưu sẵn thông tin WiFi trong NVS. Đang kết nối mạng...");
@@ -158,6 +173,9 @@ static float global_body_temp = 0.0;
 static float global_room_temp = 0.0;
 static bool is_user_present = false;
 
+// Mutex bảo vệ I2C Bus (sensor_task + display_task cùng dùng I2C_NUM_0)
+SemaphoreHandle_t i2c_mutex = NULL;
+
 
 
 static void IRAM_ATTR max30105_isr_handler(void* arg) {
@@ -176,8 +194,8 @@ static void IRAM_ATTR max30105_isr_handler(void* arg) {
 static const char *TAG = "MAIN";
 
 // --- CẤU HÌNH CHÂN CHO ESP32-S3 SUPER MINI ---
-#define I2C_SDA_PIN 12
-#define I2C_SCL_PIN 13
+#define I2C_SDA_PIN 6
+#define I2C_SCL_PIN 7
 #define MAX30105_INT_PIN 11
 #define I2C_PORT I2C_NUM_0
 
@@ -197,9 +215,9 @@ void i2c_master_init() {
 }
 
 // --- CẤU HÌNH GSR (STRESS MONITOR) ---
-#define GSR_PIN GPIO_NUM_4
+#define GSR_PIN GPIO_NUM_5
 #define GSR_ADC_UNIT ADC_UNIT_1
-#define GSR_ADC_CHANNEL ADC_CHANNEL_3 // GPIO 4 on ESP32-S3 is ADC1_CH3
+#define GSR_ADC_CHANNEL ADC_CHANNEL_4 // GPIO 5 on ESP32-S3 is ADC1_CH4
 #define GSR_SAMPLE_SIZE 20
 #define GSR_BASELINE 2330
 #define GSR_THRESHOLD_STRESS 100
@@ -215,7 +233,7 @@ void gsr_task(void *pvParameters) {
     };
     ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
 
-    // Cấu hình kênh ADC 3 (GPIO 4)
+    // Cấu hình kênh ADC 4 (GPIO 5)
     adc_oneshot_chan_cfg_t config = {
         .bitwidth = ADC_BITWIDTH_DEFAULT,       // 12-bit mặc định
         .atten = ADC_ATTEN_DB_12,               // Suy hao 12dB (Tiêu chuẩn mới của ESP-IDF v5)
@@ -274,7 +292,10 @@ void sensor_task(void *pvParameters) {
   sensor_task_handle = xTaskGetCurrentTaskHandle();
 
   // Initialize sensor
-  if (!max30105_begin(&sensor, I2C_PORT, 400000)) {
+  xSemaphoreTake(i2c_mutex, portMAX_DELAY);
+  bool sensor_ok = max30105_begin(&sensor, I2C_PORT, 400000);
+  xSemaphoreGive(i2c_mutex);
+  if (!sensor_ok) {
     ESP_LOGE(TAG, "LOI: Khong tim thay MAX30102. Kiem tra day noi!");
     while (1) {
       vTaskDelay(100);
@@ -289,6 +310,7 @@ void sensor_task(void *pvParameters) {
   int pulseWidth = 215;  // Must be lower for high sample rates
   int adcRange = 8192;
 
+  xSemaphoreTake(i2c_mutex, portMAX_DELAY);
   max30105_setup(&sensor, ledBrightness, sampleAverage, ledMode, sampleRate,
                  pulseWidth, adcRange);
 
@@ -308,6 +330,7 @@ void sensor_task(void *pvParameters) {
 
   // Kích hoạt ngắt phần cứng PPG_RDY trên MAX30105 (Thanh ghi ENABLE1 (0x02), Bit 7)
   max30105_writeRegister8(&sensor, 0x02, 0x80);
+  xSemaphoreGive(i2c_mutex);
 
   // Buffer Process Variables (static to avoid stack overflow)
   const int BATCH_SIZE = 100;
@@ -349,7 +372,9 @@ void sensor_task(void *pvParameters) {
             // Thay vì delay 1ms liên tục, task sẽ "ngủ" chờ ISR đánh thức
             // Giảm cực nhiều tải CPU cho hệ thống
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10)); // Giảm timeout xuống 10ms để tránh rớt mẫu nếu đứt dây INT
+            xSemaphoreTake(i2c_mutex, portMAX_DELAY);
             max30105_check(&sensor);
+            xSemaphoreGive(i2c_mutex);
         }
       rawRed[i] = max30105_getRed();
       rawIr[i] = max30105_getIR();
@@ -547,6 +572,57 @@ void ds18b20_task(void *pvParameters) {
     }
 }
 
+void display_task(void *pvParameters) {
+    ssd1306_t dev;
+    xSemaphoreTake(i2c_mutex, portMAX_DELAY);
+    ssd1306_init(&dev, I2C_PORT);
+    xSemaphoreGive(i2c_mutex);
+    
+    char buf[48];
+    
+    while (1) {
+        xSemaphoreTake(i2c_mutex, portMAX_DELAY);
+        
+        if (wifi_waiting_config) {
+            // === CHẾ ĐỘ CHỜ CẤU HÌNH WIFI ===
+            ssd1306_clear(&dev);
+            ssd1306_draw_string(&dev, 0, 0, "==  IoMT - PTIT   ==");
+            ssd1306_draw_string(&dev, 0, 2, "  WiFi chua san   ");
+            ssd1306_draw_string(&dev, 0, 3, "  sang hoac mat!  ");
+            ssd1306_draw_string(&dev, 0, 5, "Ket noi SoftAP:   ");
+            ssd1306_draw_string(&dev, 0, 6, "  'IoMT-PTIT'     ");
+            ssd1306_draw_string(&dev, 0, 7, "de cau hinh WiFi. ");
+        } else {
+            // === CHẾ ĐỘ HOẠT ĐỘNG BÌNH THƯỜNG ===
+            ssd1306_draw_string(&dev, 0, 0, "-- HEALTH MONITOR --");
+            
+            if (is_user_present) {
+                snprintf(buf, sizeof(buf), "BPM: %3d SpO2:%3d%%", global_bpm, global_spo2);
+                ssd1306_draw_string(&dev, 0, 2, buf);
+                
+                snprintf(buf, sizeof(buf), "Body Temp: %.1f C ", global_body_temp);
+                ssd1306_draw_string(&dev, 0, 4, buf);
+            } else {
+                ssd1306_draw_string(&dev, 0, 2, "Place finger...     ");
+                ssd1306_draw_string(&dev, 0, 4, "Body Temp: --.- C   ");
+            }
+            
+            snprintf(buf, sizeof(buf), "GSR: %4d          ", global_gsr);
+            ssd1306_draw_string(&dev, 0, 5, buf);
+            
+            const char* stress_lv = (global_stress > 0) ? "STRESS!" : "Normal ";
+            snprintf(buf, sizeof(buf), "State: %-10s", stress_lv);
+            ssd1306_draw_string(&dev, 0, 6, buf);
+            
+            snprintf(buf, sizeof(buf), "Room: %.1f C        ", global_room_temp);
+            ssd1306_draw_string(&dev, 0, 7, buf);
+        }
+        
+        xSemaphoreGive(i2c_mutex);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
 void monitor_task(void *pvParameters) {
     ESP_LOGI(TAG, "Monitor Task Started...");
     while (1) {
@@ -593,6 +669,9 @@ void app_main(void) {
   // Initialize I2C first
   i2c_master_init();
 
+  // Tạo Mutex bảo vệ I2C Bus trước khi tạo các task
+  i2c_mutex = xSemaphoreCreateMutex();
+
   // Create Sensors Tasks
   xTaskCreate(sensor_task, "sensor_task", 8192, NULL, 5, NULL);
   xTaskCreate(gsr_task, "gsr_task", 4096, NULL, 5, NULL);
@@ -600,4 +679,7 @@ void app_main(void) {
   
   // Create Monitor Task
   xTaskCreate(monitor_task, "monitor_task", 4096, NULL, 4, NULL);
+  
+  // Create Display Task
+  xTaskCreate(display_task, "display_task", 4096, NULL, 4, NULL);
 }
