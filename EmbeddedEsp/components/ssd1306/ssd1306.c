@@ -102,7 +102,7 @@ static const uint8_t font8x8[][8] = {
 };
 
 static void ssd1306_write_cmd(ssd1306_t *dev, uint8_t cmd) {
-    xSemaphoreTake(i2c_mutex, portMAX_DELAY);
+    xSemaphoreTake(i2c_mutex_oled, portMAX_DELAY);
     i2c_cmd_handle_t i2c_cmd = i2c_cmd_link_create();
     i2c_master_start(i2c_cmd);
     i2c_master_write_byte(i2c_cmd, (dev->address << 1) | I2C_MASTER_WRITE, true);
@@ -111,11 +111,11 @@ static void ssd1306_write_cmd(ssd1306_t *dev, uint8_t cmd) {
     i2c_master_stop(i2c_cmd);
     i2c_master_cmd_begin(dev->i2c_port, i2c_cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(i2c_cmd);
-    xSemaphoreGive(i2c_mutex);
+    xSemaphoreGive(i2c_mutex_oled);
 }
 
 static void ssd1306_write_data(ssd1306_t *dev, uint8_t *data, size_t len) {
-    xSemaphoreTake(i2c_mutex, portMAX_DELAY);
+    xSemaphoreTake(i2c_mutex_oled, portMAX_DELAY);
     i2c_cmd_handle_t i2c_cmd = i2c_cmd_link_create();
     i2c_master_start(i2c_cmd);
     i2c_master_write_byte(i2c_cmd, (dev->address << 1) | I2C_MASTER_WRITE, true);
@@ -124,7 +124,7 @@ static void ssd1306_write_data(ssd1306_t *dev, uint8_t *data, size_t len) {
     i2c_master_stop(i2c_cmd);
     i2c_master_cmd_begin(dev->i2c_port, i2c_cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(i2c_cmd);
-    xSemaphoreGive(i2c_mutex);
+    xSemaphoreGive(i2c_mutex_oled);
 }
 
 void ssd1306_init(ssd1306_t *dev, i2c_port_t i2c_port) {

@@ -279,6 +279,15 @@ void max30105_check(max30105_t *sensor) {
   if (numberOfSamples < 0)
     numberOfSamples += 32;
 
+  // Nếu write == read, kiểm tra xem FIFO có rỗng hay đã bị trào (overflow)
+  if (numberOfSamples == 0) {
+      uint8_t ovfCounter = max30105_readRegister8(sensor, MAX30105_OVFCOUNTER);
+      if (ovfCounter > 0) {
+          numberOfSamples = 32; // Đã trào -> đọc toàn bộ FIFO để khôi phục
+          max30105_writeRegister8(sensor, MAX30105_OVFCOUNTER, 0); // Clear overflow
+      }
+  }
+
   // Read bytes
   // int bytesToRead = numberOfSamples * 6; // 3 bytes for red, 3 for IR (Mode
   // 2) Note: If Mode 3 (MultiLED) with Green, it might be 9 bytes or different

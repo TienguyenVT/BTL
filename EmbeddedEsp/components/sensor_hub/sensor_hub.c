@@ -11,8 +11,9 @@
 
 static const char *TAG = "SENSOR_HUB";
 
-// Mutex bảo vệ bus I2C dùng chung
-SemaphoreHandle_t i2c_mutex = NULL;
+// Mutex riêng cho từng bus I2C
+SemaphoreHandle_t i2c_mutex_oled = NULL;  // Bus 0 — SSD1306
+SemaphoreHandle_t i2c_mutex_max = NULL;   // Bus 1 — MAX30105
 
 static max30105_t sensor;
 static TaskHandle_t s_sensor_task_handle = NULL;
@@ -42,9 +43,11 @@ void sensor_hub_i2c_init(void) {
     i2c_param_config(MAX30105_I2C_PORT, &conf1);
     i2c_driver_install(MAX30105_I2C_PORT, conf1.mode, 0, 0, 0);
 
-    // Tạo mutex bảo vệ bus I2C
-    i2c_mutex = xSemaphoreCreateMutex();
-    configASSERT(i2c_mutex);
+    // Tạo mutex riêng cho từng bus
+    i2c_mutex_oled = xSemaphoreCreateMutex();
+    i2c_mutex_max = xSemaphoreCreateMutex();
+    configASSERT(i2c_mutex_oled);
+    configASSERT(i2c_mutex_max);
     ESP_LOGI(TAG, "I2C bus 0 (OLED) va I2C bus 1 (MAX30105) da khoi tao thanh cong.");
 }
 
@@ -104,7 +107,7 @@ void sensor_hub_task(void *pvParameters) {
     int pulseWidth = 215;
     int adcRange = 8192;
 
-    xSemaphoreTake(i2c_mutex, portMAX_DELAY);
+    xSemaphoreTake(i2c_mutex_max, portMAX_DELAY);
     max30105_setup(&sensor, ledBrightness, sampleAverage, ledMode, sampleRate,
                    pulseWidth, adcRange);
 
@@ -124,7 +127,7 @@ void sensor_hub_task(void *pvParameters) {
 
     // Kích hoạt ngắt PPG_RDY
     max30105_writeRegister8(&sensor, 0x02, 0x80);
-    xSemaphoreGive(i2c_mutex);
+    xSemaphoreGive(i2c_mutex_max);
 
     // Buffers
     const int BATCH_SIZE = 100;
@@ -163,13 +166,19 @@ void sensor_hub_task(void *pvParameters) {
         for (int i = 0; i < BATCH_SIZE; i++) {
             while (max30105_available() == false) {
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
-                xSemaphoreTake(i2c_mutex, portMAX_DELAY);
-                max30105_check(&sensor);
-                xSemaphoreGive(i2c_mutex);
+                if (xSemaphoreTake(i2c_mutex_max, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    max30105_check(&sensor);
+                    xSemaphoreGive(i2c_mutex_max);
+                } else {
+                    ESP_LOGW(TAG, "I2C mutex timeout, skip check");
+                }
             }
             rawRed[i] = max30105_getRed();
             rawIr[i] = max30105_getIR();
             max30105_nextSample();
+
+            // Yield mỗi 25 sample để nhả CPU cho scheduler
+            if (i % 25 == 24) vTaskDelay(1);
         }
 
         // 2. Gaussian filtering
@@ -177,13 +186,12 @@ void sensor_hub_task(void *pvParameters) {
         float irMean = calculate_mean(rawIr, BATCH_SIZE);
 
         // --- SENSOR FUSION: Phát hiện User ---
-        bool ir_detected = (irMean > 10000);
-        bool temp_detected = (data->temp_baseline > 0 &&
-                              (data->room_temp - data->temp_baseline) > 0.5f);
-        bool gsr_detected = (data->gsr > 500);
-
-        // IR là tín hiệu chính. Temp + GSR bổ trợ khi ngón tay lệch cảm biến
-        bool user_present = ir_detected || (temp_detected && gsr_detected);
+        // Nâng ngưỡng IR lên 50000 để loại bỏ nhiễu môi trường. Ngón tay thật thường > 80000.
+        bool ir_detected = (irMean > 50000);
+        
+        // Loại bỏ fallback bù trừ trừ khi IR thực sự có phản xạ. 
+        // Các cảm biến GSR/Temp có thể bị nhiễu dây (ví dụ GSR=4095) gây false positive.
+        bool user_present = ir_detected;
 
         if (!user_present) {
             if (data->is_user_present) {
@@ -199,7 +207,11 @@ void sensor_hub_task(void *pvParameters) {
             }
             memset(processRed, 0, sizeof(processRed));
             memset(processIr, 0, sizeof(processIr));
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            data->bpm = 0;
+            data->spo2 = 0;
+            // Delay 100ms khi IDLE: đủ ngắn để không tràn FIFO (32 sample @ 1000Hz = 32ms)
+            // nhưng đủ dài để nhả CPU cho idle task feed watchdog
+            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         } else {
             if (!data->is_user_present) {

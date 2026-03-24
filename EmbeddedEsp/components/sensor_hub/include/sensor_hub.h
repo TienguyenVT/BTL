@@ -9,8 +9,9 @@
 #include "max30105_config.h"
 #include "ssd1306_config.h"
 
-// Mutex bảo vệ bus I2C (mỗi bus 1 mutex nếu cần)
-extern SemaphoreHandle_t i2c_mutex;
+// Mutex riêng cho từng bus I2C (2 bus độc lập, không nên chia sẻ mutex)
+extern SemaphoreHandle_t i2c_mutex_oled;  // Bus 0 — SSD1306
+extern SemaphoreHandle_t i2c_mutex_max;   // Bus 1 — MAX30105
 
 // Khởi tạo tất cả bus I2C master (gọi 1 lần trong app_main)
 void sensor_hub_i2c_init(void);

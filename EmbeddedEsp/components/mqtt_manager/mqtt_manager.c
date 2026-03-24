@@ -42,6 +42,9 @@ void mqtt_manager_start(void) {
         .credentials.username = "Ptit1234",
         .credentials.authentication.password = "Ptit1234",
         .broker.verification.crt_bundle_attach = esp_crt_bundle_attach,
+        .network.timeout_ms = 10000,        // Giảm từ 15s → 10s
+        .task.priority = 4,                  // Dưới sensor(5), trên display(3), đủ cho keepalive
+        .task.stack_size = 8192,             // TLS handshake cần nhiều stack
     };
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(s_mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);

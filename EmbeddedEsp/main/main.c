@@ -15,7 +15,7 @@
 #include "gsr_sensor.h"
 #include "sensor_hub.h"
 #include "ssd1306.h"
-#include "ds18b20.h"
+#include "ds18b20_sensor.h"
 #include "ds18b20_config.h"
 #include "ptit_logo.h"
 
@@ -36,7 +36,7 @@ static void sntp_init_time(void) {
 // --- DS18B20 TASK ---
 void ds18b20_task(void *pvParameters) {
     ESP_LOGI(TAG, "DS18B20 Task Started...");
-    ds18b20_init(DS18B20_PIN);
+    ds18b20_sensor_init(DS18B20_PIN);
 
     float temp_buffer[DS18B20_SMOOTH_SAMPLES] = {0};
     int sample_index = 0;
@@ -49,7 +49,7 @@ void ds18b20_task(void *pvParameters) {
     while (1) {
         xEventGroupWaitBits(evt, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
-        float raw_temp = ds18b20_get_temp();
+        float raw_temp = ds18b20_sensor_get_temp();
         if (raw_temp > -100.0) {
             temp_buffer[sample_index] = raw_temp;
             sample_index = (sample_index + 1) % DS18B20_SMOOTH_SAMPLES;
@@ -146,19 +146,27 @@ void display_task(void *pvParameters) {
             case MODE_ACTIVE:
                 ssd1306_draw_string(&dev, 0, 1, "HEALTH  MONITOR ");
 
-                snprintf(buf, sizeof(buf), "BPM:%3d SpO2:%d%%", data->bpm, data->spo2);
+                if (data->bpm > 0) {
+                    snprintf(buf, sizeof(buf), "BPM:%3d SpO2:%d%%", data->bpm, data->spo2);
+                } else {
+                    snprintf(buf, sizeof(buf), "BPM:--- SpO2:--%%");
+                }
                 ssd1306_draw_string(&dev, 0, 3, buf);
                 vTaskDelay(pdMS_TO_TICKS(10)); // Nhả CPU
 
-                snprintf(buf, sizeof(buf), "Body: %.1f C    ", data->body_temp);
+                if (data->room_temp > 0 && data->body_temp > (data->temp_baseline + DS18B20_TEMP_OFFSET + 0.3f)) {
+                    snprintf(buf, sizeof(buf), "Body: %.1f C    ", data->body_temp);
+                } else {
+                    snprintf(buf, sizeof(buf), "Body: --.- C    ");
+                }
                 ssd1306_draw_string(&dev, 0, 5, buf);
 
-                snprintf(buf, sizeof(buf), "GSR: %-10d", data->gsr);
+                if (data->gsr < 4000) {
+                    snprintf(buf, sizeof(buf), "GSR: %-10d", data->gsr);
+                } else {
+                    snprintf(buf, sizeof(buf), "GSR: ----       ");
+                }
                 ssd1306_draw_string(&dev, 0, 7, buf);
-
-                // snprintf(buf, sizeof(buf), "Stress: %-8s",
-                //          (data->stress > 0) ? "YES!" : "No");
-                // ssd1306_draw_string(&dev, 0, 6, buf);
                 break;
         }
 
@@ -185,10 +193,21 @@ void monitor_task(void *pvParameters) {
         TickType_t serial_interval = (data->mode == MODE_IDLE) ? pdMS_TO_TICKS(60000) : pdMS_TO_TICKS(5000);
 
         if (current_time - last_serial_log_time >= serial_interval || last_serial_log_time == 0) {
-            // Serial log
-            printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,Stress:%d,RoomTemp:%.2f,BodyTemp:%.2f\n",
-                   data->mode, data->bpm, data->spo2, data->gsr, data->stress,
-                   data->room_temp, data->body_temp);
+            // Lọc dữ liệu hiển thị (nếu mốc cảm biến không chạm -> xuất 0)
+            int pub_bpm = (data->bpm > 0) ? data->bpm : 0;
+            int pub_spo2 = (data->bpm > 0) ? data->spo2 : 0;
+            int pub_gsr = (data->gsr < 4000) ? data->gsr : 0;
+            int pub_stress = (data->gsr < 4000) ? data->stress : 0;
+            float pub_body = (data->room_temp > 0 && data->body_temp > (data->temp_baseline + DS18B20_TEMP_OFFSET + 0.3f)) ? data->body_temp : 0.0f;
+
+            // Serial log: chỉ in ra các giá trị hợp lệ theo mode
+            if (data->mode == MODE_IDLE) {
+                printf("Mode:%d,RoomTemp:%.2f\n", data->mode, data->room_temp);
+            } else {
+                printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,Stress:%d,RoomTemp:%.2f,BodyTemp:%.2f\n",
+                       data->mode, pub_bpm, pub_spo2, pub_gsr, pub_stress,
+                       data->room_temp, pub_body);
+            }
             last_serial_log_time = current_time;
         }
 
@@ -196,11 +215,24 @@ void monitor_task(void *pvParameters) {
         TickType_t mqtt_interval = (data->mode == MODE_ACTIVE) ? pdMS_TO_TICKS(60000) : pdMS_TO_TICKS(1800000);
 
         if (current_time - last_mqtt_publish_time >= mqtt_interval || last_mqtt_publish_time == 0) {
-            // Gửi MQTT
+            // Lọc lại lần nữa cho MQTT
+            int pub_bpm = (data->bpm > 0) ? data->bpm : 0;
+            int pub_spo2 = (data->bpm > 0) ? data->spo2 : 0;
+            int pub_gsr = (data->gsr < 4000) ? data->gsr : 0;
+            int pub_stress = (data->gsr < 4000) ? data->stress : 0;
+            float pub_body = (data->room_temp > 0 && data->body_temp > (data->temp_baseline + DS18B20_TEMP_OFFSET + 0.3f)) ? data->body_temp : 0.0f;
+
+            // Gửi MQTT với payload tương ứng mode
             char payload[256];
-            snprintf(payload, sizeof(payload),
-                     "{\"mode\": %d, \"room_temp\": %.1f, \"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d, \"stress\": %d}",
-                     data->mode, data->room_temp, data->body_temp, data->bpm, data->spo2, data->gsr, data->stress);
+            if (data->mode == MODE_IDLE) {
+                snprintf(payload, sizeof(payload),
+                         "{\"mode\": %d, \"room_temp\": %.1f}",
+                         data->mode, data->room_temp);
+            } else {
+                snprintf(payload, sizeof(payload),
+                         "{\"mode\": %d, \"room_temp\": %.1f, \"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d, \"stress\": %d}",
+                         data->mode, data->room_temp, pub_body, pub_bpm, pub_spo2, pub_gsr, pub_stress);
+            }
             mqtt_manager_publish("ptit/health/data", payload);
 
             last_mqtt_publish_time = current_time;
@@ -234,10 +266,10 @@ void app_main(void) {
     // 5. Khởi tạo I2C bus
     sensor_hub_i2c_init();
 
-    // 6. Tạo các FreeRTOS task
-    xTaskCreate(sensor_hub_task, "sensor_hub", 8192, NULL, 5, NULL);
-    xTaskCreate(gsr_sensor_task, "gsr_task", 4096, NULL, 5, NULL);
-    xTaskCreate(ds18b20_task, "ds18b20_task", 4096, NULL, 5, NULL);
-    xTaskCreate(monitor_task, "monitor_task", 4096, NULL, 4, NULL);
-    xTaskCreate(display_task, "display_task", 4096, NULL, 4, NULL);
+    // 6. Tạo các FreeRTOS task (priority rebalanced, không pin core)
+    xTaskCreate(sensor_hub_task, "sensor_hub", 8192, NULL, 5, NULL);  // Highest — realtime PPG
+    xTaskCreate(gsr_sensor_task, "gsr_task", 4096, NULL, 3, NULL);    // Low — ADC polling
+    xTaskCreate(ds18b20_task, "ds18b20_task", 4096, NULL, 3, NULL);   // Low — RMT non-blocking
+    xTaskCreate(monitor_task, "monitor_task", 8192, NULL, 4, NULL);   // Mid — MQTT publish
+    xTaskCreate(display_task, "display_task", 4096, NULL, 3, NULL);   // Low — UI update
 }

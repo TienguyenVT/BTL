@@ -46,6 +46,9 @@ static void wifi_prov_event_handler(void *arg, esp_event_base_t event_base,
         xEventGroupSetBits(health_data_get_event_group(), WIFI_CONNECTED_BIT);
         ESP_LOGW(TAG, "=> Da co ket noi Internet. MO CUA cho cac cam bien hoat dong!");
 
+        // Tắt WiFi Power Save để tránh interrupt delay gây WDT
+        esp_wifi_set_ps(WIFI_PS_NONE);
+
         // Bắt đầu kết nối MQTT
         mqtt_manager_start();
 
@@ -94,6 +97,6 @@ void wifi_manager_init(void) {
         ESP_LOGI(TAG, "Da luu san thong tin WiFi trong NVS. Dang ket noi mang...");
         wifi_prov_mgr_deinit();
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-        ESP_ERROR_CHECK(esp_wifi_start());
+        ESP_ERROR_CHECK(esp_wifi_start());  
     }
 }
