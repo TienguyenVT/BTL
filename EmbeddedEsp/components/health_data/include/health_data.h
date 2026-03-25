@@ -22,7 +22,6 @@ typedef struct {
     int bpm;
     int spo2;
     int gsr;
-    int stress;
     float body_temp;
     float room_temp;
 

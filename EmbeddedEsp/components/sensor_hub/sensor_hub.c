@@ -163,9 +163,26 @@ void sensor_hub_task(void *pvParameters) {
         xEventGroupWaitBits(evt, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 
         // 1. Collect batch
+        TickType_t batch_start = xTaskGetTickCount();
+        const TickType_t BATCH_TIMEOUT = pdMS_TO_TICKS(5000); // Tối đa 5 giây cho 1 batch
+
         for (int i = 0; i < BATCH_SIZE; i++) {
+            if ((xTaskGetTickCount() - batch_start) > BATCH_TIMEOUT) {
+                ESP_LOGW(TAG, "Batch timeout! Thoat vong lap thu thap data.");
+                break;
+            }
+
+            int wait_count = 0;
             while (max30105_available() == false) {
+                if (wait_count > 50) {
+                    // Nếu chờ quá lâu (>500ms) không có dữ liệu, ngắt luôn vòng for
+                    ESP_LOGW(TAG, "Timeout cho 1 sample! Nguy co ket trang thai.");
+                    goto exit_batch; 
+                }
+                
                 ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10));
+                wait_count++;
+
                 if (xSemaphoreTake(i2c_mutex_max, pdMS_TO_TICKS(50)) == pdTRUE) {
                     max30105_check(&sensor);
                     xSemaphoreGive(i2c_mutex_max);
@@ -180,6 +197,7 @@ void sensor_hub_task(void *pvParameters) {
             // Yield mỗi 25 sample để nhả CPU cho scheduler
             if (i % 25 == 24) vTaskDelay(1);
         }
+exit_batch:
 
         // 2. Gaussian filtering
         float redMean = calculate_mean(rawRed, BATCH_SIZE);
@@ -192,6 +210,8 @@ void sensor_hub_task(void *pvParameters) {
         // Loại bỏ fallback bù trừ trừ khi IR thực sự có phản xạ. 
         // Các cảm biến GSR/Temp có thể bị nhiễu dây (ví dụ GSR=4095) gây false positive.
         bool user_present = ir_detected;
+
+        static int warmup_skip = 0;
 
         if (!user_present) {
             if (data->is_user_present) {
@@ -216,6 +236,7 @@ void sensor_hub_task(void *pvParameters) {
         } else {
             if (!data->is_user_present) {
                 ESP_LOGI(TAG, "Phat hien nguoi dung. Chuyen sang ACTIVE.");
+                warmup_skip = 6; // Bỏ qua 6 lượt đo đầu để chống nhiễu loạn nhịp (artifact) và chờ AGC
             }
             data->is_user_present = true;
             if (data->mode != MODE_CONFIG) {
@@ -260,22 +281,24 @@ void sensor_hub_task(void *pvParameters) {
         }
 
         // 4. Calculate BPM / SpO2
-        maxim_heart_rate_and_oxygen_saturation(processIr, PROCESS_BUFFER_SIZE,
-                                               processRed, &spo2, &validSPO2,
-                                               &heartRate, &validHeartRate);
+        if (warmup_skip > 0) {
+            warmup_skip--;
+        } else {
+            maxim_heart_rate_and_oxygen_saturation(processIr, PROCESS_BUFFER_SIZE,
+                                                   processRed, &spo2, &validSPO2,
+                                                   &heartRate, &validHeartRate);
 
-        // 5. Store result
-        if (validHeartRate && validSPO2) {
-            if (heartRate > 40 && heartRate < 220 && spo2 > 50 && spo2 <= 100) {
-                if (resultCount < RESULT_BUFFER_SIZE) {
-                    bpmBuffer[resultCount] = heartRate;
-                    spo2Buffer[resultCount] = spo2;
-                    resultCount++;
+            // 5. Store result
+            if (validHeartRate && validSPO2) {
+                if (heartRate > 40 && heartRate < 220 && spo2 > 50 && spo2 <= 100) {
+                    if (resultCount < RESULT_BUFFER_SIZE) {
+                        bpmBuffer[resultCount] = heartRate;
+                        spo2Buffer[resultCount] = spo2;
+                        resultCount++;
+                    }
                 }
             }
         }
-
-        // 6. 10-second window aggregation
         TickType_t currentTime = xTaskGetTickCount();
         if ((currentTime - lastPrintTime) >= pdMS_TO_TICKS(10000) && resultCount > 0) {
             float bpmMean = 0;

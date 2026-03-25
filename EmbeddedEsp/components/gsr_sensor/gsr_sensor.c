@@ -39,21 +39,19 @@ void gsr_sensor_task(void *pvParameters) {
         for (int i = 0; i < GSR_SAMPLE_SIZE; i++) {
             int analog_val;
             ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, GSR_ADC_CHANNEL, &analog_val));
+            if (analog_val == 0) {
+                // Đọc lại nếu ADC dội về 0 ngẫu nhiên (lỗi ngắt hoặc nhiễu rác)
+                vTaskDelay(pdMS_TO_TICKS(2));
+                ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, GSR_ADC_CHANNEL, &analog_val));
+            }
             sum += analog_val;
             vTaskDelay(pdMS_TO_TICKS(2));
         }
 
         int gsr_average = sum / GSR_SAMPLE_SIZE;
 
-        // Phát hiện Stress
-        int stress_detect = 0;
-        if (gsr_average > (GSR_BASELINE + GSR_THRESHOLD_STRESS)) {
-            stress_detect = 4000;
-        }
-
-        // Cập nhật dữ liệu toàn cục
+        // Cập nhật dữ liệu toàn cục (Stress sẽ do ML server xử lý)
         data->gsr = gsr_average;
-        data->stress = stress_detect;
 
         vTaskDelay(pdMS_TO_TICKS(50));
     }

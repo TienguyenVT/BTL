@@ -1,3 +1,41 @@
-idf_component_register(SRCS "main.c"
-                       INCLUDE_DIRS "."
-                       PRIV_REQUIRES health_data wifi_manager mqtt_manager sensor_hub gsr_sensor ssd1306 app_ds18b20 nvs_flash freertos log driver lwip)
+idf_component_register(
+    SRCS 
+        "main.c"
+        "../components/app_ds18b20/ds18b20.c"
+        "../components/app_ds18b20/thermal_processor.c"
+        "../components/gsr_sensor/gsr_sensor.c"
+        "../components/health_data/health_data.c"
+        "../components/max30105/max30105.c"
+        "../components/max30105/spo2_algorithm.c"
+        "../components/mqtt_manager/mqtt_manager.c"
+        "../components/sensor_hub/sensor_hub.c"
+        "../components/ssd1306/ssd1306.c"
+        "../components/wifi_manager/wifi_manager.c"
+
+    INCLUDE_DIRS 
+        "."
+        "../components/app_ds18b20/include"
+        "../components/gsr_sensor/include"
+        "../components/health_data/include"
+        "../components/max30105/include"
+        "../components/mqtt_manager/include"
+        "../components/sensor_hub/include"
+        "../components/ssd1306/include"
+        "../components/wifi_manager/include"
+
+    REQUIRES 
+        nvs_flash 
+        freertos 
+        log 
+        driver 
+        lwip 
+        onewire_bus 
+        esp_adc 
+        mqtt 
+        esp-tls 
+        esp_driver_i2c 
+        esp_wifi 
+        esp_netif 
+        esp_event 
+        wifi_provisioning
+)

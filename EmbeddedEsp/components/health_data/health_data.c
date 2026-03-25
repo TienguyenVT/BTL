@@ -4,7 +4,6 @@ static health_data_t s_health_data = {
     .bpm = 0,
     .spo2 = 0,
     .gsr = 0,
-    .stress = 0,
     .body_temp = 0.0f,
     .room_temp = 0.0f,
     .mode = MODE_CONFIG,

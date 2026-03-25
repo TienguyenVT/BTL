@@ -17,6 +17,7 @@
 #include "ssd1306.h"
 #include "ds18b20_sensor.h"
 #include "ds18b20_config.h"
+#include "thermal_processor.h"
 #include "ptit_logo.h"
 
 static const char *TAG = "MAIN";
@@ -38,10 +39,8 @@ void ds18b20_task(void *pvParameters) {
     ESP_LOGI(TAG, "DS18B20 Task Started...");
     ds18b20_sensor_init(DS18B20_PIN);
 
-    float temp_buffer[DS18B20_SMOOTH_SAMPLES] = {0};
-    int sample_index = 0;
-    int valid_count = 0;
-    float prev_avg = 0;
+    thermal_processor_t tp;
+    thermal_processor_init(&tp);
 
     health_data_t *data = health_data_get();
     EventGroupHandle_t evt = health_data_get_event_group();
@@ -51,32 +50,22 @@ void ds18b20_task(void *pvParameters) {
 
         float raw_temp = ds18b20_sensor_get_temp();
         if (raw_temp > -100.0) {
-            temp_buffer[sample_index] = raw_temp;
-            sample_index = (sample_index + 1) % DS18B20_SMOOTH_SAMPLES;
-            if (valid_count < DS18B20_SMOOTH_SAMPLES) valid_count++;
+            // Đưa vào pipeline xử lý (Median + Kalman + EMA + Bù nhiệt động + Ổn định)
+            thermal_processor_update(&tp, raw_temp, data->is_user_present);
 
-            float sum = 0;
-            for (int i = 0; i < valid_count; i++) {
-                sum += temp_buffer[i];
+            data->room_temp = thermal_processor_get_room_temp(&tp);
+            
+            float new_body = thermal_processor_get_body_temp(&tp);
+            if (new_body > 0.0f) {
+                data->body_temp = new_body; // Đã chốt mức ổn định
+            } else if (!data->is_user_present) {
+                data->body_temp = 0.0f;     // Reset khi buông tay hoặc cooldown
             }
-            float avg_temp = sum / valid_count;
-
-            if (data->is_user_present) {
-                float derivative = 0;
-                if (valid_count >= DS18B20_SMOOTH_SAMPLES && prev_avg > 0) {
-                    derivative = avg_temp - prev_avg;
-                }
-                float boosted_temp = avg_temp + (derivative * DS18B20_PREDICT_FACTOR);
-                data->body_temp = (boosted_temp * DS18B20_TEMP_MULTIPLIER) + DS18B20_TEMP_OFFSET;
-            } else {
-                data->room_temp = avg_temp;
-            }
-
-            prev_avg = avg_temp;
         } else {
             ESP_LOGW(TAG, "Loi doc DS18B20 (kiem tra day noi hoac dien tro keo)");
         }
 
+        // Tần số quét DS18B20 12-bit ~ 750ms
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -119,6 +108,9 @@ void display_task(void *pvParameters) {
 
                 // 3. In Text bên phải (x=64, tối đa 8 ký tự/dòng)
                 if (timeinfo.tm_year > (2020 - 1900)) {
+                    // Xóa dòng 0 (để dọn sạch nếu trước đó bị render dính chữ)
+                    ssd1306_draw_string(&dev, 64, 0, "        ");
+                    
                     // Cắt bớt năm: 24/03/26 (8 ký tự)
                     snprintf(buf, sizeof(buf), "%02d/%02d/%02d",
                              timeinfo.tm_mday, timeinfo.tm_mon + 1, (timeinfo.tm_year + 1900) % 100);
@@ -129,7 +121,8 @@ void display_task(void *pvParameters) {
                              timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
                     ssd1306_draw_string(&dev, 64, 3, buf);
                 } else {
-                    ssd1306_draw_string(&dev, 64, 0, "Wait NTP");
+                    // Đưa chữ Wait NTP xuống dòng 1 để đè chuẩn lên vị trí của Date sau khi có mạng
+                    ssd1306_draw_string(&dev, 64, 1, "Wait NTP");
                     ssd1306_draw_string(&dev, 64, 3, "        ");
                 }
                 vTaskDelay(pdMS_TO_TICKS(10)); // Nhả CPU giữa các dòng
@@ -154,7 +147,7 @@ void display_task(void *pvParameters) {
                 ssd1306_draw_string(&dev, 0, 3, buf);
                 vTaskDelay(pdMS_TO_TICKS(10)); // Nhả CPU
 
-                if (data->room_temp > 0 && data->body_temp > (data->temp_baseline + DS18B20_TEMP_OFFSET + 0.3f)) {
+                if (data->room_temp > 0 && data->body_temp > 30.0f) {
                     snprintf(buf, sizeof(buf), "Body: %.1f C    ", data->body_temp);
                 } else {
                     snprintf(buf, sizeof(buf), "Body: --.- C    ");
@@ -197,15 +190,14 @@ void monitor_task(void *pvParameters) {
             int pub_bpm = (data->bpm > 0) ? data->bpm : 0;
             int pub_spo2 = (data->bpm > 0) ? data->spo2 : 0;
             int pub_gsr = (data->gsr < 4000) ? data->gsr : 0;
-            int pub_stress = (data->gsr < 4000) ? data->stress : 0;
-            float pub_body = (data->room_temp > 0 && data->body_temp > (data->temp_baseline + DS18B20_TEMP_OFFSET + 0.3f)) ? data->body_temp : 0.0f;
+            float pub_body = data->body_temp; // Đã chống nhiễu từ tầng Thermal Processor
 
             // Serial log: chỉ in ra các giá trị hợp lệ theo mode
             if (data->mode == MODE_IDLE) {
                 printf("Mode:%d,RoomTemp:%.2f\n", data->mode, data->room_temp);
             } else {
-                printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,Stress:%d,RoomTemp:%.2f,BodyTemp:%.2f\n",
-                       data->mode, pub_bpm, pub_spo2, pub_gsr, pub_stress,
+                printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,RoomTemp:%.2f,BodyTemp:%.2f\n",
+                       data->mode, pub_bpm, pub_spo2, pub_gsr,
                        data->room_temp, pub_body);
             }
             last_serial_log_time = current_time;
@@ -219,8 +211,7 @@ void monitor_task(void *pvParameters) {
             int pub_bpm = (data->bpm > 0) ? data->bpm : 0;
             int pub_spo2 = (data->bpm > 0) ? data->spo2 : 0;
             int pub_gsr = (data->gsr < 4000) ? data->gsr : 0;
-            int pub_stress = (data->gsr < 4000) ? data->stress : 0;
-            float pub_body = (data->room_temp > 0 && data->body_temp > (data->temp_baseline + DS18B20_TEMP_OFFSET + 0.3f)) ? data->body_temp : 0.0f;
+            float pub_body = data->body_temp; // Đã chống nhiễu từ tầng Thermal Processor
 
             // Gửi MQTT với payload tương ứng mode
             char payload[256];
@@ -230,8 +221,8 @@ void monitor_task(void *pvParameters) {
                          data->mode, data->room_temp);
             } else {
                 snprintf(payload, sizeof(payload),
-                         "{\"mode\": %d, \"room_temp\": %.1f, \"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d, \"stress\": %d}",
-                         data->mode, data->room_temp, pub_body, pub_bpm, pub_spo2, pub_gsr, pub_stress);
+                         "{\"mode\": %d, \"room_temp\": %.1f, \"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d}",
+                         data->mode, data->room_temp, pub_body, pub_bpm, pub_spo2, pub_gsr);
             }
             mqtt_manager_publish("ptit/health/data", payload);
 

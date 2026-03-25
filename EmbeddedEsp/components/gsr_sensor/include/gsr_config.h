@@ -8,11 +8,9 @@
 // ============================================
 
 // Chân ADC
-#define GSR_PIN                 GPIO_NUM_4
+#define GSR_PIN                 GPIO_NUM_5
 #define GSR_ADC_UNIT            ADC_UNIT_1
-#define GSR_ADC_CHANNEL         ADC_CHANNEL_3   // GPIO 4 trên ESP32-S3 = ADC1_CH3
+#define GSR_ADC_CHANNEL         ADC_CHANNEL_4  // GPIO 4 trên ESP32-S3 = ADC1_CH3
 
 // Tham số thuật toán
 #define GSR_SAMPLE_SIZE         20
-#define GSR_BASELINE            2330
-#define GSR_THRESHOLD_STRESS    100

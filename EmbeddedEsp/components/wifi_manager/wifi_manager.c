@@ -11,6 +11,8 @@
 
 static const char *TAG = "WIFI_AP";
 
+static bool s_is_provisioned = false;
+
 static void wifi_prov_event_handler(void *arg, esp_event_base_t event_base,
                                     int32_t event_id, void *event_data) {
     if (event_base == WIFI_PROV_EVENT) {
@@ -55,12 +57,32 @@ static void wifi_prov_event_handler(void *arg, esp_event_base_t event_base,
         // Chuyển sang chế độ IDLE (chờ user)
         health_data_get()->mode = MODE_IDLE;
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "Mat ket noi mang. Dang thu ket noi lai...");
+        if (health_data_get()->mode == MODE_CONFIG) {
+            if (s_is_provisioned) {
+                static int s_retry_num = 0;
+                s_retry_num++;
+                if (s_retry_num >= 5) {
+                    ESP_LOGW(TAG, "Loi ket noi WiFi da luu (%d lan). Xoa cau hinh va mo lai SoftAP...", s_retry_num);
+                    esp_wifi_restore();
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    esp_restart();
+                } else {
+                    ESP_LOGI(TAG, "Mat ket noi mang (%d/5). Dang thu ket noi lai...", s_retry_num);
+                    esp_wifi_connect();
+                }
+            } else {
+                // Đang trong lúc SoftAP setup, không tự connect lại để Provisioning Manager xử lý.
+                ESP_LOGI(TAG, "Dang cho user cau hinh WiFi (SoftAP)...");
+                xEventGroupClearBits(health_data_get_event_group(), WIFI_CONNECTED_BIT);
+            }
+        } else {
+            ESP_LOGI(TAG, "Mat ket noi mang. Dang thu ket noi lai...");
 
-        // ĐÓNG KHÓA
-        xEventGroupClearBits(health_data_get_event_group(), WIFI_CONNECTED_BIT);
-        ESP_LOGW(TAG, "=> Mat ket noi Internet. DUNG tiep nhan du lieu tu cam bien!");
-        esp_wifi_connect();
+            // ĐÓNG KHÓA
+            xEventGroupClearBits(health_data_get_event_group(), WIFI_CONNECTED_BIT);
+            ESP_LOGW(TAG, "=> Mat ket noi Internet. DUNG tiep nhan du lieu tu cam bien!");
+            esp_wifi_connect();
+        }
     }
 }
 
@@ -89,6 +111,7 @@ void wifi_manager_init(void) {
 
     bool provisioned = false;
     ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
+    s_is_provisioned = provisioned;
 
     if (!provisioned) {
         ESP_LOGI(TAG, "Thiet bi chua co cau hinh mang. Dang phat SoftAP 'IoMT-PTIT' de cho setup...");

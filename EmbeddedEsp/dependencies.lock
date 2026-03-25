@@ -27,6 +27,6 @@ dependencies:
 direct_dependencies:
 - espressif/ds18b20
 - espressif/onewire_bus
-manifest_hash: 4fee612ecdbf82e8b909db62e1c32aa4eb768a796dc81b9d5a940e2e131b151f
+manifest_hash: d573d4f136a5a03a4ee85175d447d13a39aaf4780ac9d97d6fc802d39f3feb50
 target: esp32s3
 version: 2.0.0
