@@ -1,72 +1,131 @@
 # -*- coding: utf-8 -*-
 """
-Ingestion Service - Logic cốt lõi của Module Nhận dữ liệu (Real-time).
+Ingestion Service — Logic cốt lõi cho ML Prediction endpoint.
 
-Quy trình MỚI (chỉ phục vụ ML Prediction mượt mà):
-  1. Nhận dữ liệu thô từ ESP32 (qua MQTT hoặc HTTP).
-  2. Validate cơ bản (các trường bắt buộc).
-  3. Load model RandomForest (.pkl) để dự đoán trực tiếp Nhãn thời gian thực (Label).
-  4. Lưu dữ liệu cùng với Label đã dự đoán thẳng vào MongoDB collection `realtime_health_data`.
-  
-Pipeline làm sạch 5 lớp KHÔNG CHẠY LUỒNG NÀY (Chỉ chạy khi huấn luyện mô hình ở train_model.py).
+Quy trình MỚI (HTTP /predict):
+  1. Node-RED gửi dữ liệu đã cleansed + engineered features qua HTTP POST.
+  2. Service load model .pkl (cached) và predict label + confidence.
+  3. Trả kết quả về cho Node-RED, Node-RED tự ghi vào MongoDB.
+
+Feature columns MUST match the order used in train_model.py exactly.
 """
 
-from typing import Dict, Any
-from database import db_connection
-from models import RealtimeHealthData
-from ml_model.predictor import RealtimePredictor
+import logging
+import os
+from typing import Any, Dict, Optional
+
+import joblib
+import numpy as np
+
+from config import settings
+
+logger = logging.getLogger("iot-ingestion.service")
+
+# ── Feature columns (must match train_model.py feature order exactly) ────────
+FEATURE_COLS: list[str] = [
+    "bpm",
+    "spo2",
+    "body_temp",
+    "gsr_adc",
+    "bpm_spo2_ratio",
+    "temp_gsr_interaction",
+    "bpm_temp_product",
+    "spo2_gsr_ratio",
+    "bpm_deviation",
+    "temp_deviation",
+    "gsr_deviation",
+    "physiological_stress_index",
+]
+
+# ── Model cache ──────────────────────────────────────────────────────────────
+_model_cache: Optional[Dict[str, Any]] = None
 
 
-class IngestionService:
-    """Service xử lý dữ liệu MQTT giám sát hệ thống thời gian thực theo cấu trúc ML-driven."""
+def get_model() -> Dict[str, Any]:
+    """
+    Load the .pkl model file once and cache it in memory.
 
-    REQUIRED_FIELDS = ["device_id", "user_id", "bpm", "spo2", "body_temp", "gsr_adc"]
+    Returns:
+        Dictionary containing 'model', 'model_type', and optionally 'label_encoder'.
 
-    def __init__(self):
-        # Lưu vào collection API Frontend cần
-        self.realtime_col = db_connection.get_realtime_collection()
-        
-        # Load RF Model từ file (nếu đã train)
-        self.predictor = RealtimePredictor()
+    Raises:
+        FileNotFoundError: If the .pkl file does not exist.
+        RuntimeError: If the .pkl file is corrupt or cannot be loaded.
+    """
+    global _model_cache
 
-    def ingest_data(self, data: Dict[str, Any]) -> None:
-        """Nhận và dự đoán 1 bản ghi MQTT Stream → Lưu MongoDB trực tiếp."""
-        # 1. Validate
-        if not self._validate(data):
-            print(f"[SERVICE] ✗ Data không hợp lệ, bỏ qua: {data}")
-            return
+    if _model_cache is not None:
+        return _model_cache
 
-        # 2. Dùng Model ML đã huấn luyện để phân tích và đánh Nhãn (Predict Label)
-        predicted_label = self.predictor.predict(data)
-        print(f"[SERVICE] 🧠 Model đã đánh nhãn: {predicted_label}")
-
-        # 3. Tạo Object và Lưu xuống MongoDB `realtime_health_data`
-        record = RealtimeHealthData(
-            device_id=data["device_id"],
-            user_id=data["user_id"],
-            bpm=float(data["bpm"]),
-            spo2=float(data["spo2"]),
-            body_temp=float(data["body_temp"]),
-            gsr_adc=float(data["gsr_adc"]),
-            ext_temp_c=float(data.get("ext_temp_c", 0)),
-            ext_humidity_pct=float(data.get("ext_humidity_pct", 0)),
-            label=predicted_label
+    model_path: str = settings.ML_MODEL_PATH
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"Model file not found at '{model_path}'. "
+            "Run 'python train_model.py' to train and save the model first."
         )
 
-        try:
-            self.realtime_col.insert_one(record.to_dict())
-            print(f"[SERVICE] ✓ Lưu Realtime DB => device={record.device_id} | label={predicted_label}")
-        except Exception as e:
-            print(f"[SERVICE] ✗ Lỗi khi lưu bản ghi realtime: {e}")
+    try:
+        loaded = joblib.load(model_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to load model from '{model_path}': {exc}") from exc
 
-    def _validate(self, data: Dict[str, Any]) -> bool:
-        """Validate các rường thiết yếu."""
-        for field in self.REQUIRED_FIELDS:
-            if field not in data:
-                print(f"[SERVICE] ✗ Thiếu trường bắt buộc: {field}")
-                return False
-        return True
+    # Handle both new dict-format and legacy bare-model format
+    if isinstance(loaded, dict):
+        _model_cache = {
+            "model": loaded["model"],
+            "model_type": loaded.get("model_type", "randomforest"),
+            "label_encoder": loaded.get("label_encoder"),
+        }
+        logger.info(
+            "Loaded %s model (version %s)",
+            _model_cache["model_type"],
+            loaded.get("version", "unknown"),
+        )
+    else:
+        _model_cache = {
+            "model": loaded,
+            "model_type": "randomforest",
+            "label_encoder": None,
+        }
+        logger.info("Loaded legacy RandomForest model")
 
-    def flush_buffer(self) -> None:
-        """Giữ method tương thích ngược (không còn cần thiết vì dữ liệu Realtime đẩy thẳng)."""
-        pass
+    return _model_cache
+
+
+async def predict_health_label(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Predict health label from a feature-engineered payload.
+
+    Args:
+        payload: Dict with keys matching FEATURE_COLS.
+
+    Returns:
+        Dict with 'predicted_label' (str) and 'confidence' (float 0.0–1.0).
+    """
+    model_info = get_model()
+    model = model_info["model"]
+    model_type = model_info["model_type"]
+    label_encoder = model_info["label_encoder"]
+
+    # Build feature array in the exact column order the model expects
+    feature_values = [float(payload[col]) for col in FEATURE_COLS]
+    X = np.array([feature_values])
+
+    # Predict
+    if model_type == "xgboost" and label_encoder is not None:
+        encoded_pred = model.predict(X)
+        predicted_label = label_encoder.inverse_transform(
+            np.array(encoded_pred).astype(int)
+        )[0]
+        # XGBoost predict_proba
+        probas = model.predict_proba(X)[0]
+        confidence = float(np.max(probas))
+    else:
+        predicted_label = model.predict(X)[0]
+        probas = model.predict_proba(X)[0]
+        confidence = float(np.max(probas))
+
+    return {
+        "predicted_label": str(predicted_label),
+        "confidence": round(confidence, 4),
+    }

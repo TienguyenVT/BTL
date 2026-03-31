@@ -21,6 +21,7 @@ class Settings:
     # Tên các collection trong MongoDB
     TRAINING_COLLECTION: str = "training_health_data" # Dữ liệu mẫu (CSV sau khi làm sạch) dùng để huấn luyện
     REALTIME_COLLECTION: str = "realtime_health_data" # Dữ liệu thực MQTT sau khi dự đoán nhãn
+    RAW_SENSOR_COLLECTION: str = "raw_sensor"          # Data Lake backup (TTL 30 ngày)
 
     # ── MQTT Broker ──────────────────────────────────────────────────────
     MQTT_BROKER_HOST: str = os.getenv("MQTT_BROKER_HOST", "localhost")

@@ -2,15 +2,15 @@
     {
         "id": "e2f1d4b6.91b5c",
         "type": "tab",
-        "label": "HiveMQ to MongoDB",
+        "label": "IoMT Streaming ETL Pipeline",
         "disabled": false,
-        "info": "Luồng Node-RED kéo dữ liệu từ HiveMQ Cloud và lưu vào MongoDB. BĐảm bảo đã cài module node-red-contrib-mongodb4."
+        "info": "Node-RED ETL pipeline: MQTT → Filter → Feature Engineering → HTTP /predict → MongoDB.\nLuồng: HiveMQ Cloud → Cleanse → Enrich → Predict Label → Lưu realtime_health_data + raw_sensor (TTL 30 ngày)."
     },
     {
         "id": "mqtt_in_node",
         "type": "mqtt in",
         "z": "e2f1d4b6.91b5c",
-        "name": "HiveMQ Data",
+        "name": "HiveMQ — ptit/health/data",
         "topic": "ptit/health/data",
         "qos": "0",
         "datatype": "auto-detect",
@@ -19,12 +19,10 @@
         "rap": true,
         "rh": 0,
         "inputs": 0,
-        "x": 150,
-        "y": 140,
+        "x": 170,
+        "y": 200,
         "wires": [
-            [
-                "json_parse_node"
-            ]
+            ["json_parse_node"]
         ]
     },
     {
@@ -35,34 +33,111 @@
         "property": "payload",
         "action": "obj",
         "pretty": false,
-        "x": 350,
-        "y": 140,
+        "x": 390,
+        "y": 200,
         "wires": [
-            [
-                "mongodb_out_node",
-                "debug_node"
-            ]
+            ["func_filter_normalize"]
         ]
     },
     {
-        "id": "debug_node",
-        "type": "debug",
+        "id": "func_filter_normalize",
+        "type": "function",
         "z": "e2f1d4b6.91b5c",
-        "name": "Debug Output",
-        "active": true,
-        "tosidebar": true,
-        "console": false,
-        "tostatus": false,
-        "complete": "payload",
-        "targetType": "msg",
-        "statusVal": "",
-        "statusType": "auto",
-        "x": 580,
-        "y": 80,
-        "wires": []
+        "name": "1. Filter & Normalize",
+        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 1: Filter & Normalize (v3)\n// - Maps ESP32 'gsr' → 'gsr_adc'\n// - Adds default device_id\n// - Allows value=0 (sensor not ready yet)\n// - Only rejects truly impossible non-zero values\n// ══════════════════════════════════════════════════════════\n\nvar d = msg.payload;\nif (!d || typeof d !== 'object') {\n    return null;\n}\n\n// 1. Map ESP32 field names\nif (d.gsr !== undefined && d.gsr_adc === undefined) {\n    d.gsr_adc = d.gsr;\n}\n\n// 2. Default device_id\nif (!d.device_id) {\n    d.device_id = 'esp32_iot_health_01';\n}\n\n// 3. Default missing sensor values to 0\nd.bpm       = (d.bpm !== undefined)       ? d.bpm       : 0;\nd.spo2      = (d.spo2 !== undefined)      ? d.spo2      : 0;\nd.body_temp = (d.body_temp !== undefined) ? d.body_temp : 0;\nd.gsr_adc   = (d.gsr_adc !== undefined)   ? d.gsr_adc   : 0;\n\n// 4. Cast to float\nvar bpm       = parseFloat(d.bpm);\nvar spo2      = parseFloat(d.spo2);\nvar body_temp = parseFloat(d.body_temp);\nvar gsr_adc   = parseFloat(d.gsr_adc);\n\n// 5. Outlier rejection: only reject NON-ZERO impossible values\n//    ESP32 sends 0 when sensor not ready — that's valid, let it through.\nif (bpm !== 0 && (bpm < 20 || bpm > 220)) {\n    node.warn('BPM out of range (' + bpm + ') — dropping');\n    return null;\n}\nif (spo2 !== 0 && (spo2 < 50 || spo2 > 100)) {\n    node.warn('SpO2 out of range (' + spo2 + ') — dropping');\n    return null;\n}\nif (body_temp !== 0 && (body_temp < 25 || body_temp > 45)) {\n    node.warn('Temp out of range (' + body_temp + ') — dropping');\n    return null;\n}\nif (gsr_adc < 0) {\n    node.warn('GSR negative (' + gsr_adc + ') — dropping');\n    return null;\n}\n\n// 6. Save raw backup for Data Lake\nmsg.raw_backup = {\n    device_id: String(d.device_id),\n    timestamp: d.timestamp || Date.now(),\n    mode: d.mode,\n    bpm: bpm,\n    spo2: spo2,\n    body_temp: body_temp,\n    gsr_adc: gsr_adc,\n    ingested_at: new Date()\n};\n\n// 7. Clean payload for next node\nmsg.payload = {\n    device_id: String(d.device_id),\n    timestamp: d.timestamp || Date.now(),\n    bpm: bpm,\n    spo2: spo2,\n    body_temp: body_temp,\n    gsr_adc: gsr_adc,\n    mode: d.mode\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 200,
+        "wires": [
+            ["func_feature_eng"]
+        ]
     },
     {
-        "id": "mongodb_out_node",
+        "id": "func_feature_eng",
+        "type": "function",
+        "z": "e2f1d4b6.91b5c",
+        "name": "2. Feature Engineering",
+        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 2: Feature Engineering\n// Computes 8 derived features to match train_model.py exactly.\n// Uses epsilon = 1e-6 to prevent division by zero.\n// ══════════════════════════════════════════════════════════\n\nvar d   = msg.payload;\nvar eps = 1e-6;\n\nvar bpm       = d.bpm;\nvar spo2      = d.spo2;\nvar body_temp = d.body_temp;\nvar gsr_adc   = d.gsr_adc;\n\n// ── 8 Engineered Features (mirroring train_model.py) ────\n\n// 1. bpm_spo2_ratio = bpm / (spo2 + eps)\nd.bpm_spo2_ratio = bpm / (spo2 + eps);\n\n// 2. temp_gsr_interaction = body_temp * gsr_adc / 1000\nd.temp_gsr_interaction = body_temp * gsr_adc / 1000;\n\n// 3. bpm_temp_product = bpm * body_temp\nd.bpm_temp_product = bpm * body_temp;\n\n// 4. spo2_gsr_ratio = spo2 / (gsr_adc + eps)\nd.spo2_gsr_ratio = spo2 / (gsr_adc + eps);\n\n// 5. bpm_deviation = abs(bpm - 75)\nd.bpm_deviation = Math.abs(bpm - 75);\n\n// 6. temp_deviation = abs(body_temp - 36.8)\nd.temp_deviation = Math.abs(body_temp - 36.8);\n\n// 7. gsr_deviation = abs(gsr_adc - 2200)\nd.gsr_deviation = Math.abs(gsr_adc - 2200);\n\n// 8. physiological_stress_index = (bpm - 75)/75 + (gsr_adc - 2200)/2200\nd.physiological_stress_index = (bpm - 75) / 75 + (gsr_adc - 2200) / 2200;\n\nmsg.payload = d;\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 900,
+        "y": 200,
+        "wires": [
+            ["func_store_before_http"]
+        ]
+    },
+    {
+        "id": "func_store_before_http",
+        "type": "function",
+        "z": "e2f1d4b6.91b5c",
+        "name": "Store sensorPayload",
+        "func": "// Save the full engineered payload before HTTP request overwrites msg.payload\nmsg.sensorPayload = JSON.parse(JSON.stringify(msg.payload));\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1160,
+        "y": 200,
+        "wires": [
+            ["http_predict"]
+        ]
+    },
+    {
+        "id": "http_predict",
+        "type": "http request",
+        "z": "e2f1d4b6.91b5c",
+        "name": "POST /predict",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "http://localhost:8000/predict",
+        "tls": "",
+        "persist": true,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [
+            { "keyType": "other", "keyValue": "Content-Type", "valueType": "other", "valueValue": "application/json" }
+        ],
+        "x": 1380,
+        "y": 200,
+        "wires": [
+            ["func_attach_label"]
+        ]
+    },
+    {
+        "id": "func_attach_label",
+        "type": "function",
+        "z": "e2f1d4b6.91b5c",
+        "name": "3. Attach Label & Fallback",
+        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 3: Attach Label & Fallback\n// Merges /predict response back onto sensorPayload.\n// If HTTP failed, sets label = null, confidence = null.\n// Outputs 2 messages: [0] = realtime_health_data, [1] = raw_sensor\n// ══════════════════════════════════════════════════════════\n\nvar sensor = msg.sensorPayload || {};\nvar httpResp = msg.payload;\nvar statusCode = msg.statusCode;\n\n// Merge prediction result (or fallback to null)\nif (statusCode === 200 && httpResp && httpResp.predicted_label) {\n    sensor.predicted_label = httpResp.predicted_label;\n    sensor.confidence      = httpResp.confidence;\n} else {\n    node.warn(\"HTTP /predict failed (status=\" + statusCode + \") — setting label to null\");\n    sensor.predicted_label = null;\n    sensor.confidence      = null;\n}\n\n// Add ingestion timestamp\nsensor.ingested_at = new Date();\n\n// ── Output 1: realtime_health_data (Datawarehouse) ──────\nvar msg1 = { payload: sensor };\n\n// ── Output 2: raw_sensor (Data Lake backup) ─────────────\nvar rawBackup = msg.raw_backup || {};\nvar msg2 = { payload: rawBackup };\n\nreturn [msg1, msg2];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1610,
+        "y": 200,
+        "wires": [
+            ["mongo_realtime", "debug_realtime"],
+            ["mongo_raw", "debug_raw"]
+        ]
+    },
+    {
+        "id": "mongo_realtime",
         "type": "mongodb4",
         "z": "e2f1d4b6.91b5c",
         "clientNode": "mongo_client",
@@ -72,21 +147,79 @@
         "output": "toArray",
         "maxTimeMS": "0",
         "handleDocId": false,
-        "name": "Save to MongoDB",
-        "x": 590,
-        "y": 200,
-        "wires": [
-            []
-        ]
+        "name": "Save → realtime_health_data",
+        "x": 1910,
+        "y": 160,
+        "wires": [[]]
     },
     {
-        "id": "comment_node",
+        "id": "mongo_raw",
+        "type": "mongodb4",
+        "z": "e2f1d4b6.91b5c",
+        "clientNode": "mongo_client",
+        "mode": "collection",
+        "collection": "raw_sensor",
+        "operation": "insertOne",
+        "output": "toArray",
+        "maxTimeMS": "0",
+        "handleDocId": false,
+        "name": "Save → raw_sensor (TTL 30d)",
+        "x": 1920,
+        "y": 280,
+        "wires": [[]]
+    },
+    {
+        "id": "debug_realtime",
+        "type": "debug",
+        "z": "e2f1d4b6.91b5c",
+        "name": "Debug: Realtime Record",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload.predicted_label",
+        "targetType": "msg",
+        "statusVal": "payload.predicted_label",
+        "statusType": "auto",
+        "x": 1920,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "debug_raw",
+        "type": "debug",
+        "z": "e2f1d4b6.91b5c",
+        "name": "Debug: Raw Backup",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1910,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "comment_pipeline",
         "type": "comment",
         "z": "e2f1d4b6.91b5c",
-        "name": "Lưu ý cài đặt Username/Password",
-        "info": "Nhấn đúp vào node 'HiveMQ Data' -> Bấm hình cây bút ở HiveMQ Cloud Broker -> Chuyển sang Tab Security và nhập lại:\\nUsername: Ptit1234\\nPassword: Ptit1234\\n(Node-RED tự xoá pass khi export)",
-        "x": 200,
+        "name": "📋 Pipeline: MQTT → Filter → Features → /predict → MongoDB",
+        "info": "Architecture: Node-RED Streaming ETL\n\n1. MQTT In: ptit/health/data từ HiveMQ Cloud\n2. Filter & Normalize: Validate + outlier rejection\n3. Feature Engineering: 8 derived features (mirrors train_model.py)\n4. HTTP POST /predict: Python FastAPI ML endpoint\n5. Attach Label: Merge prediction result\n6. MongoDB Output:\n   - realtime_health_data: Labeled records (Datawarehouse)\n   - raw_sensor: Raw backup (Data Lake, TTL 30 ngày)\n\nLưu ý:\n- Python server phải chạy tại http://localhost:8000\n- HTTP timeout: mặc định Node-RED (5s), có thể giảm xuống 200ms nếu cần\n- Nhập lại MQTT credentials sau khi import (Security tab)",
+        "x": 360,
         "y": 80,
+        "wires": []
+    },
+    {
+        "id": "comment_credentials",
+        "type": "comment",
+        "z": "e2f1d4b6.91b5c",
+        "name": "⚠ Nhập lại MQTT Username/Password sau import",
+        "info": "Nhấn đúp vào node 'HiveMQ' → Bấm hình cây bút ở HiveMQ Cloud Broker → Chuyển sang Tab Security và nhập lại:\nUsername: Ptit1234\nPassword: Ptit1234\n(Node-RED tự xoá password khi export)",
+        "x": 330,
+        "y": 120,
         "wires": []
     },
     {

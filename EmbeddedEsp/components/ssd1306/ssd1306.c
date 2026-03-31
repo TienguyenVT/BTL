@@ -1,7 +1,8 @@
 #include "ssd1306.h"
+#include "sensor_hub.h"
 #include <string.h>
 
-// Complete 5x7 font for ASCII 32-126, stored as 8 bytes per character (5 glyph + 3 padding)
+// Complete 5x7 font for ASCII 32-126, stored as 8 bytes per character
 static const uint8_t font8x8[][8] = {
     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }, // 32 (space)
     { 0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x00, 0x00 }, // 33 !
@@ -101,56 +102,60 @@ static const uint8_t font8x8[][8] = {
 };
 
 static void ssd1306_write_cmd(ssd1306_t *dev, uint8_t cmd) {
+    xSemaphoreTake(i2c_mutex_oled, portMAX_DELAY);
     i2c_cmd_handle_t i2c_cmd = i2c_cmd_link_create();
     i2c_master_start(i2c_cmd);
     i2c_master_write_byte(i2c_cmd, (dev->address << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(i2c_cmd, 0x00, true); // Command stream
+    i2c_master_write_byte(i2c_cmd, 0x00, true);
     i2c_master_write_byte(i2c_cmd, cmd, true);
     i2c_master_stop(i2c_cmd);
     i2c_master_cmd_begin(dev->i2c_port, i2c_cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(i2c_cmd);
+    xSemaphoreGive(i2c_mutex_oled);
 }
 
 static void ssd1306_write_data(ssd1306_t *dev, uint8_t *data, size_t len) {
+    xSemaphoreTake(i2c_mutex_oled, portMAX_DELAY);
     i2c_cmd_handle_t i2c_cmd = i2c_cmd_link_create();
     i2c_master_start(i2c_cmd);
     i2c_master_write_byte(i2c_cmd, (dev->address << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(i2c_cmd, 0x40, true); // Data stream
+    i2c_master_write_byte(i2c_cmd, 0x40, true);
     i2c_master_write(i2c_cmd, data, len, true);
     i2c_master_stop(i2c_cmd);
     i2c_master_cmd_begin(dev->i2c_port, i2c_cmd, 1000 / portTICK_PERIOD_MS);
     i2c_cmd_link_delete(i2c_cmd);
+    xSemaphoreGive(i2c_mutex_oled);
 }
 
 void ssd1306_init(ssd1306_t *dev, i2c_port_t i2c_port) {
     dev->i2c_port = i2c_port;
     dev->address = SSD1306_I2C_ADDRESS;
 
-    ssd1306_write_cmd(dev, 0xAE); // Display off
-    ssd1306_write_cmd(dev, 0xD5); // Set display clock divide ratio
+    ssd1306_write_cmd(dev, 0xAE);
+    ssd1306_write_cmd(dev, 0xD5);
     ssd1306_write_cmd(dev, 0x80);
-    ssd1306_write_cmd(dev, 0xA8); // Set multiplex ratio
-    ssd1306_write_cmd(dev, 0x3F); // 64 lines
-    ssd1306_write_cmd(dev, 0xD3); // Set display offset
+    ssd1306_write_cmd(dev, 0xA8);
+    ssd1306_write_cmd(dev, 0x3F);
+    ssd1306_write_cmd(dev, 0xD3);
     ssd1306_write_cmd(dev, 0x00);
-    ssd1306_write_cmd(dev, 0x40); // Set display start line
-    ssd1306_write_cmd(dev, 0x8D); // Charge pump
-    ssd1306_write_cmd(dev, 0x14); // Enable charge pump
-    ssd1306_write_cmd(dev, 0x20); // Memory addressing mode
-    ssd1306_write_cmd(dev, 0x02); // Page addressing mode
-    ssd1306_write_cmd(dev, 0xA1); // Segment re-map (column 127 mapped to SEG0)
-    ssd1306_write_cmd(dev, 0xC8); // COM output scan direction (remapped)
-    ssd1306_write_cmd(dev, 0xDA); // COM pins hardware configuration
-    ssd1306_write_cmd(dev, 0x12);
-    ssd1306_write_cmd(dev, 0x81); // Contrast control
-    ssd1306_write_cmd(dev, 0xCF);
-    ssd1306_write_cmd(dev, 0xD9); // Pre-charge period
-    ssd1306_write_cmd(dev, 0xF1);
-    ssd1306_write_cmd(dev, 0xDB); // VCOMH deselect level
     ssd1306_write_cmd(dev, 0x40);
-    ssd1306_write_cmd(dev, 0xA4); // Entire display ON (resume)
-    ssd1306_write_cmd(dev, 0xA6); // Normal display (not inverted)
-    ssd1306_write_cmd(dev, 0xAF); // Display ON
+    ssd1306_write_cmd(dev, 0x8D);
+    ssd1306_write_cmd(dev, 0x14);
+    ssd1306_write_cmd(dev, 0x20);
+    ssd1306_write_cmd(dev, 0x02);
+    ssd1306_write_cmd(dev, 0xA1);
+    ssd1306_write_cmd(dev, 0xC8);
+    ssd1306_write_cmd(dev, 0xDA);
+    ssd1306_write_cmd(dev, 0x12);
+    ssd1306_write_cmd(dev, 0x81);
+    ssd1306_write_cmd(dev, 0xCF);
+    ssd1306_write_cmd(dev, 0xD9);
+    ssd1306_write_cmd(dev, 0xF1);
+    ssd1306_write_cmd(dev, 0xDB);
+    ssd1306_write_cmd(dev, 0x40);
+    ssd1306_write_cmd(dev, 0xA4);
+    ssd1306_write_cmd(dev, 0xA6);
+    ssd1306_write_cmd(dev, 0xAF);
 
     ssd1306_clear(dev);
 }
@@ -167,7 +172,6 @@ void ssd1306_clear(ssd1306_t *dev) {
 }
 
 void ssd1306_draw_string(ssd1306_t *dev, uint8_t x, uint8_t page, const char *str) {
-    // Set cursor position
     ssd1306_write_cmd(dev, 0xB0 + page);
     ssd1306_write_cmd(dev, 0x00 | (x & 0x0F));
     ssd1306_write_cmd(dev, 0x10 | ((x >> 4) & 0x0F));
@@ -178,11 +182,21 @@ void ssd1306_draw_string(ssd1306_t *dev, uint8_t x, uint8_t page, const char *st
             uint8_t index = c - 32;
             ssd1306_write_data(dev, (uint8_t *)font8x8[index], 8);
         } else {
-            // Unknown character: draw blank
             uint8_t blank[8] = {0};
             ssd1306_write_data(dev, blank, 8);
         }
         str++;
+    }
+}
+
+void ssd1306_draw_bitmap(ssd1306_t *dev, uint8_t x, uint8_t y, const uint8_t *bitmap, uint8_t w, uint8_t h) {
+    uint8_t pages = h / 8;
+    for (uint8_t p = 0; p < pages; p++) {
+        uint8_t page = (y / 8) + p;
+        ssd1306_write_cmd(dev, 0xB0 + page);
+        ssd1306_write_cmd(dev, 0x00 | (x & 0x0F));
+        ssd1306_write_cmd(dev, 0x10 | ((x >> 4) & 0x0F));
+        ssd1306_write_data(dev, (uint8_t *)bitmap + (p * w), w);
     }
 }
 

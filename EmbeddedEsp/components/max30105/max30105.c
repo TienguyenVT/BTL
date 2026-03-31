@@ -126,18 +126,21 @@ bool max30105_begin(max30105_t *sensor, i2c_port_t port, uint32_t speed) {
   sensor->i2c_port = port;
   sensor->i2c_address = MAX30105_ADDRESS;
 
+  // Cho sensor thời gian ổn định sau khi cấp nguồn
+  vTaskDelay(pdMS_TO_TICKS(100));
+
   // Check Part ID
   uint8_t partId = max30105_readRegister8(sensor, MAX30105_PARTID);
   if (partId != 0x15) { // MAX30105 and MAX30102 usually return 0x15
-    // Some variants might be different, but 0x15 is standard
     ESP_LOGW(TAG, "Device not found or Part ID mismatch: 0x%02X", partId);
-    // Don't fail hard for now, just warn
-    // return false;
+    return false;
   }
+
+  ESP_LOGI(TAG, "MAX30105 detected! Part ID: 0x%02X", partId);
 
   // Reset
   max30105_writeRegister8(sensor, MAX30105_MODECONFIG, MAX30105_RESET);
-  vTaskDelay(pdMS_TO_TICKS(10));
+  vTaskDelay(pdMS_TO_TICKS(100));
 
   // Initial State: FIFO Config
   // smp_ave = 8, rollover = enable, fifo_a_full = 17
@@ -275,6 +278,15 @@ void max30105_check(max30105_t *sensor) {
   int numberOfSamples = writePointer - readPointer;
   if (numberOfSamples < 0)
     numberOfSamples += 32;
+
+  // Nếu write == read, kiểm tra xem FIFO có rỗng hay đã bị trào (overflow)
+  if (numberOfSamples == 0) {
+      uint8_t ovfCounter = max30105_readRegister8(sensor, MAX30105_OVFCOUNTER);
+      if (ovfCounter > 0) {
+          numberOfSamples = 32; // Đã trào -> đọc toàn bộ FIFO để khôi phục
+          max30105_writeRegister8(sensor, MAX30105_OVFCOUNTER, 0); // Clear overflow
+      }
+  }
 
   // Read bytes
   // int bytesToRead = numberOfSamples * 6; // 3 bytes for red, 3 for IR (Mode

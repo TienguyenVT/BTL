@@ -4,13 +4,13 @@ HYPERPARAMETER TUNING RESULTS
 
 Best Parameters:
 ----------------------------------------
-  class_weight: None
-  max_depth: None
-  min_samples_leaf: 1
-  min_samples_split: 2
-  n_estimators: 100
+  class_weight: balanced
+  max_depth: 20
+  min_samples_leaf: 4
+  min_samples_split: 10
+  n_estimators: 300
 
-Best CV Score (F1-weighted): 96.37%
+Best CV Score (F1-weighted): 95.35%
 
 ============================================================
 Parameter Grid Searched:
