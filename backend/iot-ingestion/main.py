@@ -1,78 +1,141 @@
 # -*- coding: utf-8 -*-
 """
-Entry Point - Khởi chạy IoT Ingestion Module.
+Entry Point — FastAPI HTTP server cho IoT Ingestion Module.
 
-Module này chỉ có nhiệm vụ:
-  1. Xử lý dữ liệu định kỳ từ MongoDB.
-  2. Tự động huấn luyện mô hình theo chu kỳ.
-  
+Endpoints:
+  POST /predict   — Nhận dữ liệu đã feature-engineered, trả predicted_label + confidence
+  GET  /health    — Health-check / readiness probe
+
 Cách chạy:
-  $ python main.py
+  $ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-import signal
-import sys
-import time
-import threading
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from database import db_connection
-from service import IngestionService
-from train_model import run_training_pipeline
+from database import db_connection, setup_indexes
+from schemas import PredictRequest, PredictResponse
+from service import get_model, predict_health_label
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger("iot-ingestion.main")
 
 
-def automated_training_job(interval_seconds: int = 3600):
-    """Job chạy ngầm để tự động huấn luyện lại mô hình sau mỗi khoảng thời gian."""
-    while True:
-        print("[MAIN] Bắt đầu tiến trình tự động huấn luyện mô hình...")
-        try:
-            success = run_training_pipeline()
-            if success:
-                print(f"[MAIN] Đã hoàn thành huấn luyện. Đợi {interval_seconds} giây cho lần tiếp theo.")
-            else:
-                print(f"[MAIN] Huấn luyện thất bại hoặc không có dữ liệu. Đợi {interval_seconds} giây.")
-        except Exception as e:
-            print(f"[MAIN] Lỗi trong quá trình huấn luyện: {e}")
-            
-        time.sleep(interval_seconds)
+# ── Lifespan (startup / shutdown) ────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan handler — chạy khi khởi động và tắt server."""
+    logger.info("=" * 60)
+    logger.info("  IoMT — IoT INGESTION MODULE (FastAPI)")
+    logger.info("  HTTP Predict API for Node-RED ETL pipeline")
+    logger.info("=" * 60)
 
-
-def main():
-    """Khởi chạy toàn bộ IoT Ingestion Module (Chỉ xử lý DB)."""
-
-    print("=" * 60)
-    print("  IoMT - IoT INGESTION MODULE")
-    print("  Xử lý dữ liệu sức khỏe định kỳ từ MongoDB")
-    print("=" * 60)
-
-    # ── Khởi tạo Service ─────────────────────────────────────────
-    service = IngestionService()
-
-    # ── Xử lý tín hiệu tắt (Graceful Shutdown) ──────────────────
-    def shutdown_handler(signum, frame):
-        print("\n[MAIN] ⚠ Đang dừng hệ thống...")
-        service.flush_buffer()      # Xử lý nốt data
-        db_connection.close()        # Đóng MongoDB
-        print("[MAIN] ✓ Đã dừng hoàn toàn.")
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, shutdown_handler)
-    signal.signal(signal.SIGTERM, shutdown_handler)
-
-    # ── Khởi chạy Thread Huấn luyện tự động ─────────────────────
-    # Ở đây set tạm 60 giây (1 phút) để demo, thực tế nên là 3600 (1 giờ) hoặc 86400 (1 ngày)
-    train_thread = threading.Thread(target=automated_training_job, args=(60,), daemon=True)
-    train_thread.start()
-
-    # ── Main Loop (Mô phỏng xử lý Ingestion nếu cần) ─────────────
-    print(f"[MAIN] ▶ Đang chạy hệ thống (Nhấn Ctrl+C để thoát)...")
+    # Setup MongoDB indexes
     try:
-        while True:
-            # Code xử lý dữ liệu realtime khác nếu có
-            time.sleep(1)
-    except KeyboardInterrupt:
-        shutdown_handler(signal.SIGINT, None)
+        db = db_connection.database
+        await setup_indexes(db)
+        logger.info("MongoDB indexes created/verified successfully")
+    except Exception as e:
+        logger.warning("Failed to setup MongoDB indexes: %s", e)
+
+    # Pre-load ML model into cache
+    try:
+        get_model()
+        logger.info("ML model pre-loaded successfully")
+    except FileNotFoundError as e:
+        logger.warning("ML model not available at startup: %s", e)
+    except RuntimeError as e:
+        logger.error("ML model load error: %s", e)
+
+    yield  # ── Server chạy ──
+
+    # Shutdown
+    logger.info("Shutting down IoT Ingestion Module...")
+    db_connection.close()
+    logger.info("MongoDB connection closed. Goodbye.")
 
 
+# ── FastAPI App ──────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="IoMT Ingestion — Health Predict API",
+    description="ML prediction endpoint for the IoT health monitoring streaming ETL pipeline.",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+# CORS — cho phép Node-RED và dashboard truy cập
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────
+@app.get("/health", tags=["system"])
+async def health_check():
+    """Readiness probe — kiểm tra server + model sẵn sàng."""
+    try:
+        get_model()
+        model_status = "loaded"
+    except (FileNotFoundError, RuntimeError):
+        model_status = "unavailable"
+
+    return {
+        "status": "ok",
+        "model_status": model_status,
+        "mongo_db": settings.MONGO_DB_NAME,
+    }
+
+
+@app.post("/predict", response_model=PredictResponse, tags=["prediction"])
+async def predict(request: PredictRequest) -> PredictResponse:
+    """
+    Predict health label from feature-engineered sensor data.
+
+    Called by Node-RED after it performs cleansing + feature engineering.
+    Returns predicted_label and confidence score.
+    """
+    try:
+        result = await predict_health_label(request.model_dump())
+    except FileNotFoundError as e:
+        logger.error("Model file not found: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail="ML model is not available. Please train the model first.",
+        ) from e
+    except RuntimeError as e:
+        logger.error("Model runtime error: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"ML model error: {e}",
+        ) from e
+    except KeyError as e:
+        logger.error("Missing feature in payload: %s", e)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required feature: {e}",
+        ) from e
+
+    return PredictResponse(**result)
+
+
+# ── Run directly ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    main()
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host=settings.HTTP_HOST,
+        port=settings.HTTP_PORT,
+        reload=True,
+    )

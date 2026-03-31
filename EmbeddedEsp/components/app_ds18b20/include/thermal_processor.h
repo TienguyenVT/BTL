@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 // --- CẤU HÌNH THAM SỐ THUẬT TOÁN ---
 
@@ -24,15 +25,39 @@
 #define DS18B20_PREDICT_TAU     2.0f   // Hệ số nhân đạo hàm
 #define DS18B20_MAX_DT          0.5f   // Kẹp đạo hàm lớn nhất trong 1 chu kỳ để tránh spike
 
-// 5. MÔ HÌNH BÙ NHIỆT ĐỘNG (THERMAL COMPENSATION)
-// k = (T_body_ref - T_skin) / (T_skin - T_room)
-#define THERMAL_K_COEFF         0.40f  // Hệ số truyền nhiệt giữa ngón tay và môi trường
+// 5. MÔ HÌNH BÙ NHIỆT ĐỘNG (DUAL-SENSOR COMPENSATION)
+#define THERMAL_K_BASE            0.40f  // Hệ số truyền nhiệt cơ bản
+#define HUMIDITY_K_SENSITIVITY    0.003f // Độ nhạy k theo humidity
+#define VASOCONSTRICTION_THRESHOLD 22.0f // °C — dưới ngưỡng này co mạch tăng
+#define VASOCONSTRICTION_FACTOR   0.008f // k tăng thêm per °C dưới ngưỡng
 #define BODY_TEMP_MIN           34.0f  // Ngưỡng dưới hợp lệ
 #define BODY_TEMP_MAX           42.0f  // Ngưỡng trên hợp lệ
 
-// 6. CỔNG ỔN ĐỊNH (STABILITY GATE)
+// 6. CỔNG KIỂM TRA SINH LÝ (PHYSIOLOGICAL GATE)
+#define T_SKIN_MIN_VALID        28.0f  // °C — dưới mức này: chạm chưa đủ
+#define T_SKIN_MAX_VALID        40.0f  // °C — trên mức này: bất thường
+#define SKIN_STABILITY_RATE     0.15f  // °C/s — T_skin phải ổn định
+
+// 7. CỔNG ỔN ĐỊNH (STABILITY GATE)
 #define STABLE_THRESHOLD        0.1f   // °C sai lệch tối đa để coi là đang hội tụ
 #define STABLE_COUNT_REQ        5      // Số chu kỳ liên tiếp cần
+
+// 8. SENSOR FUSION BIAS CORRECTION (DHT11 ↔ DS18B20)
+#define BIAS_CORRECTION_ALPHA   0.005f // Tốc độ học bias (rất chậm)
+#define MAX_SENSOR_DIVERGENCE   3.0f   // °C — nếu > 3°C thì cảnh báo
+#define DHT11_AMBIENT_EMA_ALPHA 0.2f   // EMA alpha cho ambient temp từ DHT11
+
+// 9. WARM START (Rút ngắn thời gian hội tụ Kalman)
+#define WARM_START_OFFSET      7.0f    // T_ambient + 7 = prior T_skin ban đầu
+#define WARM_START_VARIANCE    16.0f   // 4°C std dev — uncertainty cao, Kalman tin measurement
+
+// 10. EXPONENTIAL EXTRAPOLATION (T_inf PREDICTION)
+#define PRED_BUF_SIZE     12
+#define PRED_SAMPLE_MS    4000     // lấy mẫu mỗi 4 giây — đủ thưa để thấy curve
+#define PRED_MIN_POINTS   6        // cần ít nhất 6 điểm trước khi predict
+#define PRED_STABLE_ERR   0.25f    // °C — nếu T_inf thay đổi < 0.25°C qua 3 lần → ổn định
+#define PRED_PHY_MIN      33.0f
+#define PRED_PHY_MAX      38.5f
 
 // --- CẤU TRÚC DỮ LIỆU ---
 
@@ -48,6 +73,20 @@ typedef struct {
     float Q; // Nhiễu quá trình setup
     float R; // Nhiễu đo lường setup
 } kalman_filter_t;
+
+typedef struct {
+    float   temps[PRED_BUF_SIZE];
+    uint32_t ticks[PRED_BUF_SIZE];
+    int     count;
+    int     head;
+
+    float   t_inf_history[3];     // 3 lần predict gần nhất để check stability
+    int     hist_idx;
+
+    float   t_inf_stable;         // kết quả cuối khi đã ổn định
+    bool    is_stable;
+    uint32_t last_sample_tick;
+} thermal_predictor_t;
 
 typedef struct {
     // Pipeline Tầng 1: Median
@@ -75,12 +114,25 @@ typedef struct {
     // Dữ liệu bộ lọc & chốt
     float room_temp_locked; // Khóa giá trị phòng ngay trước khi chạm 
     float current_body_temp;// Nhiệt độ cơ thể hợp lệ cuối cùng
-    float current_room_temp;// Nhiệt độ phòng hện tại
+    float current_room_temp;// Nhiệt độ phòng hiện tại (DS18B20 IDLE)
+
+    // Dual-sensor fusion
+    float dht11_bias_correction; // Learned bias correction cho DHT11
+    float prev_skin_temp;   // T_skin chu kỳ trước (tính dT/dt)
+    uint8_t confidence;     // 0-100 measurement confidence
+
+    // Warm start & Extrapolation
+    thermal_predictor_t predictor;
+    uint32_t touch_start_tick;
+    bool prediction_ready;
 } thermal_processor_t;
 
 // API
 void thermal_processor_init(thermal_processor_t *tp);
-void thermal_processor_update(thermal_processor_t *tp, float raw_temp, bool is_user_present);
+void thermal_processor_update(thermal_processor_t *tp, float raw_temp, bool is_user_present,
+                              float ambient_temp_dht11, int humidity);
 
 float thermal_processor_get_body_temp(thermal_processor_t *tp);
 float thermal_processor_get_room_temp(thermal_processor_t *tp);
+uint8_t thermal_processor_get_confidence(thermal_processor_t *tp);
+float thermal_processor_get_bias(thermal_processor_t *tp);

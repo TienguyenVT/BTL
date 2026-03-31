@@ -18,6 +18,7 @@
 #include "ds18b20_sensor.h"
 #include "ds18b20_config.h"
 #include "thermal_processor.h"
+#include "dht11_sensor.h"
 #include "ptit_logo.h"
 
 static const char *TAG = "MAIN";
@@ -50,17 +51,23 @@ void ds18b20_task(void *pvParameters) {
 
         float raw_temp = ds18b20_sensor_get_temp();
         if (raw_temp > -100.0) {
-            // Đưa vào pipeline xử lý (Median + Kalman + EMA + Bù nhiệt động + Ổn định)
-            thermal_processor_update(&tp, raw_temp, data->is_user_present);
+            // Đưa vào pipeline xử lý (Dual-Sensor Compensation)
+            // Truyền ambient_temp (DHT11) và humidity vào thermal processor
+            thermal_processor_update(&tp, raw_temp, data->is_user_present,
+                                     data->ambient_temp, data->humidity);
 
             data->room_temp = thermal_processor_get_room_temp(&tp);
             
             float new_body = thermal_processor_get_body_temp(&tp);
             if (new_body > 0.0f) {
-                data->body_temp = new_body; // Đã chốt mức ổn định
+                data->body_temp = new_body;
             } else if (!data->is_user_present) {
-                data->body_temp = 0.0f;     // Reset khi buông tay hoặc cooldown
+                data->body_temp = 0.0f;
             }
+
+            // Cập nhật confidence & bias vào health_data
+            data->measurement_confidence = thermal_processor_get_confidence(&tp);
+            data->dht11_bias = thermal_processor_get_bias(&tp);
         } else {
             ESP_LOGW(TAG, "Loi doc DS18B20 (kiem tra day noi hoac dien tro keo)");
         }
@@ -129,10 +136,40 @@ void display_task(void *pvParameters) {
 
                 // ssd1306_draw_string(&dev, 64, 3, "IDLE    ");
 
-                snprintf(buf, sizeof(buf), "T:%.1f C   ", data->room_temp);
+                snprintf(buf, sizeof(buf), "A:%.1f C   ", data->ambient_temp);
                 ssd1306_draw_string(&dev, 64, 5, buf);
 
+                snprintf(buf, sizeof(buf), "H:%3d%%    ", data->humidity);
+                ssd1306_draw_string(&dev, 64, 6, buf);
+
                 // ssd1306_draw_string(&dev, 64, 7, "Put hand");
+                break;
+            }
+
+            case MODE_CALIBRATE: {
+                ssd1306_draw_string(&dev, 0, 0, "GSR CALIBRATION  ");
+                ssd1306_draw_string(&dev, 0, 2, "Adjust to 2200   ");
+
+                // GSR raw (giá trị thực của user, chưa offset)
+                if (data->gsr_raw > 0) {
+                    snprintf(buf, sizeof(buf), "Raw: %-5d     ", data->gsr_raw);
+                } else {
+                    snprintf(buf, sizeof(buf), "Raw: ----       ");
+                }
+                ssd1306_draw_string(&dev, 0, 4, buf);
+
+                // GSR sau offset (target = 2200)
+                if (data->calibrate_done) {
+                    snprintf(buf, sizeof(buf), "GSR: %-5d     ", data->gsr);
+                    ssd1306_draw_string(&dev, 0, 5, buf);
+                    snprintf(buf, sizeof(buf), "Offset: %-5d   ", data->gsr_offset);
+                    ssd1306_draw_string(&dev, 0, 6, buf);
+                } else {
+                    ssd1306_draw_string(&dev, 0, 5, "GSR: --        ");
+                    ssd1306_draw_string(&dev, 0, 6, "Hold btn to save");
+                }
+
+                ssd1306_draw_string(&dev, 0, 7, "Target: 2200    ");
                 break;
             }
 
@@ -154,10 +191,13 @@ void display_task(void *pvParameters) {
                 }
                 ssd1306_draw_string(&dev, 0, 5, buf);
 
-                if (data->gsr < 4000) {
-                    snprintf(buf, sizeof(buf), "GSR: %-10d", data->gsr);
+                snprintf(buf, sizeof(buf), "H:%3d%%  GSR:%4d", data->humidity, data->gsr);
+                ssd1306_draw_string(&dev, 0, 6, buf);
+
+                if (data->calibrate_done) {
+                    snprintf(buf, sizeof(buf), "OFFSET:%-5d   ", data->gsr_offset);
                 } else {
-                    snprintf(buf, sizeof(buf), "GSR: ----       ");
+                    snprintf(buf, sizeof(buf), "NOT CALIBRATED ");
                 }
                 ssd1306_draw_string(&dev, 0, 7, buf);
                 break;
@@ -182,8 +222,8 @@ void monitor_task(void *pvParameters) {
 
         TickType_t current_time = xTaskGetTickCount();
 
-        // Thời gian chờ để log Serial: 1 phút (60s) ở IDLE, 5 giây ở ACTIVE/CONFIG
-        TickType_t serial_interval = (data->mode == MODE_IDLE) ? pdMS_TO_TICKS(60000) : pdMS_TO_TICKS(5000);
+        // Thời gian chờ để log Serial: 1 phút (60s) ở IDLE, 100ms ở ACTIVE/CONFIG (10Hz)
+        TickType_t serial_interval = (data->mode == MODE_IDLE) ? pdMS_TO_TICKS(60000) : pdMS_TO_TICKS(100);
 
         if (current_time - last_serial_log_time >= serial_interval || last_serial_log_time == 0) {
             // Lọc dữ liệu hiển thị (nếu mốc cảm biến không chạm -> xuất 0)
@@ -194,43 +234,59 @@ void monitor_task(void *pvParameters) {
 
             // Serial log: chỉ in ra các giá trị hợp lệ theo mode
             if (data->mode == MODE_IDLE) {
-                printf("Mode:%d,RoomTemp:%.2f\n", data->mode, data->room_temp);
+                printf("Mode:%d,AmbientDHT:%.2f,RoomDS:%.2f,Bias:%.3f\n",
+                       data->mode, data->ambient_temp, data->room_temp,
+                       data->dht11_bias);
             } else {
-                printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,RoomTemp:%.2f,BodyTemp:%.2f\n",
+                printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,Ambient:%.2f,BodyTemp:%.2f,Conf:%d,CalOffset:%d\n",
                        data->mode, pub_bpm, pub_spo2, pub_gsr,
-                       data->room_temp, pub_body);
+                       data->ambient_temp, pub_body, data->measurement_confidence,
+                       data->gsr_offset);
             }
             last_serial_log_time = current_time;
         }
 
-        // Kiểm tra xem đã đến lúc gửi MQTT chưa (ACTIVE: 1 phút, IDLE: 30 phút)
-        TickType_t mqtt_interval = (data->mode == MODE_ACTIVE) ? pdMS_TO_TICKS(60000) : pdMS_TO_TICKS(1800000);
+        // === MQTT LOGIC ===
+        // Ở chế độ IDLE (mode 1), không gửi MQTT theo yêu cầu
+        if (data->mode != MODE_IDLE) {
+            // 1Hz (1000ms) cho ACTIVE — TLS overhead không cho phép 10Hz tới HiveMQ Cloud
+            TickType_t mqtt_interval = (data->mode == MODE_ACTIVE) ? pdMS_TO_TICKS(1000) : pdMS_TO_TICKS(60000);
 
-        if (current_time - last_mqtt_publish_time >= mqtt_interval || last_mqtt_publish_time == 0) {
-            // Lọc lại lần nữa cho MQTT
-            int pub_bpm = (data->bpm > 0) ? data->bpm : 0;
-            int pub_spo2 = (data->bpm > 0) ? data->spo2 : 0;
-            int pub_gsr = (data->gsr < 4000) ? data->gsr : 0;
-            float pub_body = data->body_temp; // Đã chống nhiễu từ tầng Thermal Processor
+            if (current_time - last_mqtt_publish_time >= mqtt_interval || last_mqtt_publish_time == 0) {
+                // Lọc lại lần nữa cho MQTT
+                int pub_bpm = (data->bpm > 0) ? data->bpm : 0;
+                int pub_spo2 = (data->bpm > 0) ? data->spo2 : 0;
+                int pub_gsr = (data->gsr < 4000) ? data->gsr : 0;
+                float pub_body = data->body_temp; // Đã chống nhiễu từ tầng Thermal Processor
 
-            // Gửi MQTT với payload tương ứng mode
-            char payload[256];
-            if (data->mode == MODE_IDLE) {
+                // Lấy timestamp định dạng năm:tháng:ngày - giờ:phút:giây
+                time_t now;
+                struct tm timeinfo;
+                time(&now);
+                localtime_r(&now, &timeinfo);
+                char time_str[64]; // Tăng buffer size để tránh lỗi format-truncation
+                snprintf(time_str, sizeof(time_str), "%04d:%02d:%02d - %02d:%02d:%02d",
+                         timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                         timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+                
+                // Gửi MQTT
+                char payload[512]; 
                 snprintf(payload, sizeof(payload),
-                         "{\"mode\": %d, \"room_temp\": %.1f}",
-                         data->mode, data->room_temp);
-            } else {
-                snprintf(payload, sizeof(payload),
-                         "{\"mode\": %d, \"room_temp\": %.1f, \"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d}",
-                         data->mode, data->room_temp, pub_body, pub_bpm, pub_spo2, pub_gsr);
+                         "{\"timestamp\": \"%s\", \"mode\": %d, \"dht11_room_temp\": %.1f, \"dht11_humidity\": %d, "
+                         "\"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d, "
+                         "\"confidence\": %d, \"dht11_bias\": %.3f}",
+                         time_str, data->mode, data->ambient_temp, data->humidity,
+                         pub_body, pub_bpm, pub_spo2, pub_gsr,
+                         data->measurement_confidence, data->dht11_bias);
+                
+                mqtt_manager_publish("ptit/health/data", payload);
+
+                last_mqtt_publish_time = current_time;
             }
-            mqtt_manager_publish("ptit/health/data", payload);
-
-            last_mqtt_publish_time = current_time;
         }
 
-        // Delay ngắn gọn để cho phép task check các điều kiện liên tục mà không ăn 100% CPU
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Delay ngắn gọn (50ms) để task check các điều kiện liên tục nhịp nhàng 10Hz
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -261,6 +317,7 @@ void app_main(void) {
     xTaskCreate(sensor_hub_task, "sensor_hub", 8192, NULL, 5, NULL);  // Highest — realtime PPG
     xTaskCreate(gsr_sensor_task, "gsr_task", 4096, NULL, 3, NULL);    // Low — ADC polling
     xTaskCreate(ds18b20_task, "ds18b20_task", 4096, NULL, 3, NULL);   // Low — RMT non-blocking
+    xTaskCreate(dht11_sensor_task, "dht11_task", 4096, NULL, 3, NULL);   // NEW
     xTaskCreate(monitor_task, "monitor_task", 8192, NULL, 4, NULL);   // Mid — MQTT publish
     xTaskCreate(display_task, "display_task", 4096, NULL, 3, NULL);   // Low — UI update
 }

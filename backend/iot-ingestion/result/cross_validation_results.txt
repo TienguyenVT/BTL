@@ -2,16 +2,16 @@
 CROSS-VALIDATION RESULTS (5-Fold Stratified)
 ============================================================
 
-Accuracy (mean ± std): 96.22% ± 0.27%
-F1-Score Weighted (mean ± std): 96.23% ± 0.27%
-F1-Score Macro (mean ± std): 96.11% ± 0.32%
-Precision (mean ± std): 96.24% ± 0.27%
-Recall (mean ± std): 96.22% ± 0.27%
+Accuracy (mean ± std): 94.87% ± 0.41%
+F1-Score Weighted (mean ± std): 94.90% ± 0.38%
+F1-Score Macro (mean ± std): 85.20% ± 1.11%
+Precision (mean ± std): 94.94% ± 0.38%
+Recall (mean ± std): 94.87% ± 0.41%
 
 Fold-by-Fold Details:
 ----------------------------------------
-Fold 1: Accuracy=96.29% | F1=96.28%
-Fold 2: Accuracy=96.69% | F1=96.70%
-Fold 3: Accuracy=95.89% | F1=95.89%
-Fold 4: Accuracy=96.06% | F1=96.07%
-Fold 5: Accuracy=96.17% | F1=96.19%
+Fold 1: Accuracy=94.96% | F1=94.86%
+Fold 2: Accuracy=95.06% | F1=94.96%
+Fold 3: Accuracy=95.46% | F1=95.57%
+Fold 4: Accuracy=94.25% | F1=94.42%
+Fold 5: Accuracy=94.60% | F1=94.68%

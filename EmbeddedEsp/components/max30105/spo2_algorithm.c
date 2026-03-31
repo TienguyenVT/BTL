@@ -1,5 +1,6 @@
 #include "spo2_algorithm.h"
 #include <stdint.h>
+#include <math.h>
 
 void maxim_heart_rate_and_oxygen_saturation(
     uint32_t *pun_ir_buffer, int32_t n_ir_buffer_length,
@@ -155,30 +156,50 @@ void maxim_heart_rate_and_oxygen_saturation(
 
   // Calculate SpO2
   if (n_npks >= 2) {
+    // Calculate DC (direct current / mean) for both channels
     int32_t n_red_mean = 0;
-    for (i = 0; i < n_ir_buffer_length; i++)
-      n_red_mean += pun_red_buffer[i];
-    n_red_mean = n_red_mean / n_ir_buffer_length;
-
-    int64_t red_ac = 0;
-    int64_t ir_ac = 0;
-
+    int32_t n_ir_mean = 0;
     for (i = 0; i < n_ir_buffer_length; i++) {
-      red_ac +=
-          (pun_red_buffer[i] - n_red_mean) * (pun_red_buffer[i] - n_red_mean);
-      ir_ac +=
-          (pun_ir_buffer[i] - un_ir_mean) * (pun_ir_buffer[i] - un_ir_mean);
+      n_red_mean += pun_red_buffer[i];
+      n_ir_mean += pun_ir_buffer[i];
     }
+    n_red_mean = n_red_mean / n_ir_buffer_length;
+    n_ir_mean = n_ir_mean / n_ir_buffer_length;
 
-    if (ir_ac > 0 && n_red_mean > 0) {
-      (void)red_ac; // Silence unused warning
-      // Mock calculation derived from variances
-      *pn_spo2 = 98; // Placeholder for simplified algorithm
+    // Calculate AC (alternating current / RMS of deviations) for both channels
+    int32_t n_red_ac = 0;
+    int32_t n_ir_ac = 0;
+    for (i = 0; i < n_ir_buffer_length; i++) {
+      int32_t red_diff = (int32_t)pun_red_buffer[i] - n_red_mean;
+      int32_t ir_diff = (int32_t)pun_ir_buffer[i] - n_ir_mean;
+      n_red_ac += red_diff * red_diff;
+      n_ir_ac += ir_diff * ir_diff;
+    }
+    // RMS = sqrt(sum(x^2) / n)
+    float red_ac = sqrt((float)n_red_ac / n_ir_buffer_length);
+    float ir_ac = sqrt((float)n_ir_ac / n_ir_buffer_length);
+
+    // Prevent division by zero
+    if (n_ir_mean > 0 && n_red_mean > 0 && ir_ac > 0 && red_ac > 0) {
+      // R = (AC_red / DC_red) / (AC_ir / DC_ir)
+      float r = (red_ac / n_red_mean) / (ir_ac / n_ir_mean);
+
+      // Maxim's empirical SpO2 formula (derived from look-up table)
+      // SpO2 = -45.60 * R^2 + 30.354 * R + 94.845
+      float spo2_f = -45.60f * r * r + 30.354f * r + 94.845f;
+
+      // Clamp to valid physiological range [70, 100]
+      if (spo2_f < 70.0f)
+        spo2_f = 70.0f;
+      if (spo2_f > 100.0f)
+        spo2_f = 100.0f;
+
+      *pn_spo2 = (int32_t)(spo2_f + 0.5f); // Round to nearest integer
       *pch_spo2_valid = 1;
 
-      if (n_npks > 2) {
-        *pn_spo2 = 95 + (n_npks % 5);
-      }
+      // Debug log for validation (can be removed in production)
+      // ESP_LOGI(TAG, "SpO2: %ld, R=%.4f (red_dc=%ld, ir_dc=%ld, red_ac=%.2f, ir_ac=%.2f)",
+      //          *pn_spo2, r, n_red_mean, n_ir_mean, red_ac, ir_ac);
     } else {
       *pn_spo2 = -999;
       *pch_spo2_valid = 0;

@@ -1,15 +1,26 @@
 ============================================================
 MODEL COMPARISON: RandomForest vs XGBoost
+(Both models tuned with GridSearchCV)
 ============================================================
 
-RandomForest (best params from GridSearch):
-  - Accuracy: 96.46%
-  - F1-Score (weighted): 96.45%
+RandomForest (tuned params):
+  - class_weight: balanced
+  - max_depth: 20
+  - min_samples_leaf: 4
+  - min_samples_split: 10
+  - n_estimators: 300
+  - Accuracy: 95.86%
+  - F1-Score (weighted): 96.34%
 
-XGBoost (default params):
-  - Accuracy: 96.80%
-  - F1-Score (weighted): 96.81%
+XGBoost (tuned params):
+  - colsample_bytree: 0.8
+  - learning_rate: 0.2
+  - max_depth: 3
+  - n_estimators: 100
+  - subsample: 1.0
+  - Accuracy: 95.56%
+  - F1-Score (weighted): 95.23%
 
-Selected Model: xgboost
-Final Accuracy: 96.80%
-Final F1-Score: 96.81%
+Selected Model: randomforest
+Final Accuracy: 95.86%
+Final F1-Score: 96.34%

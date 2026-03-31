@@ -7,10 +7,27 @@
 // CẤU HÌNH PHẦN CỨNG - CẢM BIẾN GSR
 // ============================================
 
-// Chân ADC
-#define GSR_PIN                 GPIO_NUM_5
+// Chân ADC cho cảm biến GSR
+#define GSR_PIN                 GPIO_NUM_4
 #define GSR_ADC_UNIT            ADC_UNIT_1
-#define GSR_ADC_CHANNEL         ADC_CHANNEL_4  // GPIO 4 trên ESP32-S3 = ADC1_CH3
+#define GSR_ADC_CHANNEL         ADC_CHANNEL_3  // GPIO 4 trên ESP32-S3 = ADC1_CH3
 
 // Tham số thuật toán
 #define GSR_SAMPLE_SIZE         20
+
+// ============================================
+// CẤU HÌNH PHẦN CỨNG - BIẾN TRỞ CALIBRATION
+// ============================================
+#define CAL_POT_PIN             GPIO_NUM_6
+#define CAL_ADC_UNIT            ADC_UNIT_1
+#define CAL_ADC_CHANNEL         ADC_CHANNEL_6  // GPIO 6 trên ESP32-S3 = ADC1_CH6
+
+// Baseline cố định mà admin set cho tất cả user
+#define GSR_TARGET_BASELINE     2200
+
+// Số mẫu đọc biến trở để lấy trung bình (chống nhiễu)
+#define CAL_POT_SAMPLE_SIZE     10
+
+// Nút nhấn calibrate (GPIO 0 = BOOT button trên ESP32-S3)
+#define CAL_BUTTON_PIN          GPIO_NUM_0
+#define CAL_BUTTON_PRESS_MS     3000   // Nhấn giữ 3 giây để xác nhận calibrate

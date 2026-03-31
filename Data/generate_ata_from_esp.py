@@ -1,7 +1,9 @@
 import pandas as pd
 import numpy as np
 import random
+import uuid
 from datetime import datetime, timedelta
+
 
 # ============================================================================
 # CẤU HÌNH USER - MÔ PHỎNG DATA THỰC TẾ TỪ ESP
@@ -253,38 +255,76 @@ def generate_esp_data(user_config):
 
             # --- Tạo mẫu dữ liệu cuối cùng ---
             final_bpm = int(clamp(current_bpm, 40, 200))
-            final_spo2 = round(clamp(current_spo2, 85.0, 100.0), 1)
+            final_spo2 = int(clamp(current_spo2, 85.0, 100.0))
             final_temp = round(clamp(current_temp, 35.0, 42.0), 2)
             final_gsr = int(clamp(current_gsr, 0, 4095))
+            final_confidence = 100
 
             # --- Inject noise (lỗi phần cứng ESP - khoảng 8%) ---
-            # Noise mô phỏng: nhiễu điện từ, mất gói tin UART, ADC drift
             if random.random() < 0.08:
+                final_confidence = random.choice([0, 50])
                 noise_targets = random.sample(['bpm', 'spo2', 'temp', 'gsr'], k=random.randint(1, 2))
                 if 'bpm' in noise_targets:
                     final_bpm = inject_noise(final_bpm, noise_prob=1.0, max_val=255)
-                    final_bpm = int(clamp(final_bpm, 0, 255))  # clamp sau noise
+                    final_bpm = int(clamp(final_bpm, 0, 255))
                 if 'spo2' in noise_targets:
-                    final_spo2 = inject_noise(final_spo2, noise_prob=1.0, max_val=100)
-                    final_spo2 = round(clamp(final_spo2, 0.0, 100.0), 1)  # clamp sau noise
+                    final_spo2 = int(inject_noise(final_spo2, noise_prob=1.0, max_val=100))
+                    final_spo2 = int(clamp(final_spo2, 0, 100))
                 if 'temp' in noise_targets:
                     final_temp = inject_noise(final_temp, noise_prob=1.0, max_val=45.0)
-                    final_temp = round(clamp(final_temp, 0.0, 50.0), 2)  # clamp sau noise
+                    final_temp = round(clamp(final_temp, 0.0, 50.0), 2)
                 if 'gsr' in noise_targets:
                     final_gsr = inject_noise(final_gsr, noise_prob=1.0, max_val=4095)
-                    final_gsr = int(clamp(final_gsr, 0, 4095))  # clamp sau noise
+                    final_gsr = int(clamp(final_gsr, 0, 4095))
+
+            # --- Engineered Features ---
+            eps = 1e-6
+            bpm_spo2_ratio = final_bpm / (final_spo2 + eps)
+            temp_gsr_interaction = (final_temp * final_gsr) / 1000.0
+            bpm_temp_product = final_bpm * final_temp
+            spo2_gsr_ratio = final_spo2 / (final_gsr + eps)
+            bpm_deviation = abs(final_bpm - 75)
+            temp_deviation = abs(final_temp - 36.8)
+            gsr_deviation = abs(final_gsr - 2200)
+            physiological_stress_index = (final_bpm - 75) / 75.0 + (final_gsr - 2200) / 2200.0
+
+            predicted_label = current_state
+            
+            # Simulated Confidence probability
+            if final_confidence == 100:
+                probability = round(random.uniform(0.70, 0.99), 4)
+            else:
+                probability = round(random.uniform(0.20, 0.60), 4)
+
+            ingested_at = (timestamp + timedelta(milliseconds=random.randint(200, 1500))).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
+            _id_hex = uuid.uuid4().hex[:24]
+
+            device_id_map = {
+                'User_A': 'esp32_iot_health_01',
+                'User_B': 'esp32_iot_health_02',
+                'User_C': 'esp32_iot_health_03'
+            }
 
             data.append({
-                'User_ID': user_id,
-                'Timestamp': timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                'Time_Slot': slot_name,
-                'BPM': final_bpm,
-                'SpO2': final_spo2,
-                'Body_Temp': final_temp,
-                'GSR_ADC': final_gsr,
-                'Ext_Temp_C': round(current_ext_temp, 1),
-                'Ext_Humidity_Pct': round(current_ext_humid, 1),
-                # KHÔNG có cột Label - đây là data thực tế từ ESP
+                '_id': _id_hex,
+                'device_id': device_id_map.get(user_id, 'esp32_iot_health_00'),
+                'timestamp': int(timestamp.timestamp()),
+                'bpm': final_bpm,
+                'spo2': final_spo2,
+                'body_temp': final_temp,
+                'gsr_adc': final_gsr,
+                'mode': 2,
+                'bpm_spo2_ratio': bpm_spo2_ratio,
+                'temp_gsr_interaction': temp_gsr_interaction,
+                'bpm_temp_product': bpm_temp_product,
+                'spo2_gsr_ratio': spo2_gsr_ratio,
+                'bpm_deviation': bpm_deviation,
+                'temp_deviation': temp_deviation,
+                'gsr_deviation': gsr_deviation,
+                'physiological_stress_index': physiological_stress_index,
+                'predicted_label': predicted_label,
+                'confidence': probability,
+                'ingested_at': ingested_at
             })
 
     return pd.DataFrame(data)
@@ -302,9 +342,9 @@ if __name__ == "__main__":
     # Ghép tất cả user vào 1 file
     final_df = pd.concat(all_dfs, ignore_index=True)
 
-    # Lưu file CSV (không có Label)
-    filename = "health_data_from_esp.csv"
-    final_df.to_csv(filename, index=False)
+    # Lưu file JSON để dễ đẩy vào MongoDB
+    filename = "health_data_from_esp.json"
+    final_df.to_json(filename, orient='records', lines=False, indent=2)
 
     print(f"\n{'='*60}")
     print(f"Generated: {filename}")
@@ -313,10 +353,10 @@ if __name__ == "__main__":
     print(f"Columns: {list(final_df.columns)}")
     print(f"{'='*60}")
 
-    # Thống kê GSR baseline cho từng user (lọc Normal state để thấy rõ sự khác biệt)
-    print("\n--- GSR ADC Statistics (per User) ---")
-    for user_id in ['User_A', 'User_B', 'User_C']:
-        user_df = final_df[final_df['User_ID'] == user_id]
-        gsr = user_df['GSR_ADC']
-        print(f"  {user_id}: min={gsr.min()}, max={gsr.max()}, "
+    # Thống kê GSR
+    print("\n--- GSR Statistics (per Device) ---")
+    for device_id in final_df['device_id'].unique():
+        device_df = final_df[final_df['device_id'] == device_id]
+        gsr = device_df['gsr_adc']
+        print(f"  {device_id}: min={gsr.min()}, max={gsr.max()}, "
               f"mean={gsr.mean():.1f}, median={gsr.median():.1f}")

@@ -4,6 +4,7 @@ idf_component_register(
         "../components/app_ds18b20/ds18b20.c"
         "../components/app_ds18b20/thermal_processor.c"
         "../components/gsr_sensor/gsr_sensor.c"
+        "../components/dht11_sensor/dht11_sensor.c"    # NEW
         "../components/health_data/health_data.c"
         "../components/max30105/max30105.c"
         "../components/max30105/spo2_algorithm.c"
@@ -16,6 +17,7 @@ idf_component_register(
         "."
         "../components/app_ds18b20/include"
         "../components/gsr_sensor/include"
+        "../components/dht11_sensor/include"            # NEW
         "../components/health_data/include"
         "../components/max30105/include"
         "../components/mqtt_manager/include"
