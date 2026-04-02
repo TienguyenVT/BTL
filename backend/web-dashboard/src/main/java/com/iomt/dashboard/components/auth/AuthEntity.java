@@ -1,29 +1,36 @@
 package com.iomt.dashboard.components.auth;
 
-import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.Instant;
 
+/**
+ * Entity: Tai khoan nguoi dung.
+ * Collection: "users"
+ *
+ * Cac truong:
+ *    - id       : ObjectId tu dong
+ *    - email    : Email (unique)
+ *    - password : Mat khau (plain text, chi de demo)
+ *    - name     : Ten nguoi dung
+ *    - createdAt: Thoi diem tao tai khoan
+ */
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
 @Document(collection = "users")
 public class AuthEntity {
 
     @Id
-    private String id;
+    public String id;
 
     @Indexed(unique = true)
-    private String email;
+    public String email;
 
-    private String password;
+    public String password;
 
-    private String name;
+    public String name;
 
-    private Instant createdAt;
+    public Instant createdAt;
 }

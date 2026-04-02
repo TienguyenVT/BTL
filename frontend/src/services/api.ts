@@ -1,123 +1,50 @@
-/**
- * API Service - Gọi Backend RESTful API bằng Axios.
- * Tập trung quản lý tất cả API calls tại một nơi.
- *
- * Base URL trỏ tới Spring Boot backend (port 8080).
- * Vite proxy đã được cấu hình trong vite.config.ts.
- */
-
 import axios from 'axios';
-import { HealthData } from '../types';
 
-// ── Axios Instance ──────────────────────────────────────────────────────
 const api = axios.create({
-  baseURL: '/api',              // Proxy qua Vite → http://localhost:8080/api
-  timeout: 10000,               // Timeout 10 giây
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
+  timeout: 10000,
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// ── Interceptor: Log lỗi ────────────────────────────────────────────────
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('[API] Lỗi:', error.response?.status, error.message);
-    return Promise.reject(error);
-  }
-);
+const authHeader = (userId) => ({ headers: { 'X-User-Id': userId } });
 
-// ── API Functions ───────────────────────────────────────────────────────
+// Auth
+export const register = (data) => api.post('/auth/register', data);
+export const login = (data) => api.post('/auth/login', data);
 
-/**
- * Lấy dữ liệu sức khỏe mới nhất của user.
- * Endpoint: GET /api/health/latest?userId=xxx
- */
-export const getLatestHealthData = async (userId: string): Promise<HealthData | null> => {
-  try {
-    const response = await api.get<HealthData>('/health/latest', {
-      params: { userId },
-    });
-    return response.data;
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 204) {
-      return null; // Không có dữ liệu
-    }
-    throw error;
-  }
-};
+// Profile
+export const getProfile = (userId) => api.get('/profile', authHeader(userId));
+export const updateProfile = (userId, data) => api.put('/profile', data, authHeader(userId));
 
-/**
- * Lấy lịch sử dữ liệu theo khoảng thời gian.
- * Endpoint: GET /api/health/history?userId=xxx&hours=24
- */
-export const getHealthHistory = async (
-  userId: string,
-  hours: number = 24
-): Promise<HealthData[]> => {
-  const response = await api.get<HealthData[]>('/health/history', {
-    params: { userId, hours },
-  });
-  return response.data;
-};
+// Devices
+export const getDevices = (userId) => api.get('/devices', authHeader(userId));
+export const addDevice = (userId, data) => api.post('/devices', data, authHeader(userId));
+export const deleteDevice = (userId, id) => api.delete(`/devices/${id}`, authHeader(userId));
 
-/**
- * Lấy N bản ghi gần nhất.
- * Endpoint: GET /api/health/recent?userId=xxx&limit=20
- */
-export const getRecentHealthData = async (
-  userId: string,
-  limit: number = 20
-): Promise<HealthData[]> => {
-  const response = await api.get<HealthData[]>('/health/recent', {
-    params: { userId, limit },
-  });
-  return response.data;
-};
+// Health (READ-ONLY)
+export const getLatestHealth = (userId) => api.get('/health/latest', authHeader(userId));
+export const getHealthHistory = (userId, hours) => api.get('/health/history', { params: { hours }, ...authHeader(userId) });
+export const getRecentHealth = (userId, limit) => api.get('/health/recent', { params: { limit }, ...authHeader(userId) });
 
-// ═══════════════════════════════════════════════════════════════════════
-// DIARY — Sổ tay sức khỏe cá nhân
-// ═══════════════════════════════════════════════════════════════════════
+// Sessions
+export const getLatestSession = () => api.get('/health/sessions/latest');
+export const getLiveSession = () => api.get('/health/sessions/live');
+export const getSessionById = (sessionId) => api.get(`/health/sessions/${sessionId}`);
+export const getSessionsHistory = (hours) => api.get('/health/sessions/history', { params: { hours } });
+export const getAllSessions = () => api.get('/health/sessions');
 
-import { DiaryNote } from '../types';
+// Environment (realtime 1s)
+export const getEnvironment = () => api.get('/health/environment');
 
-/**
- * Lấy danh sách ghi chú.
- * Endpoint: GET /api/diary-notes
- * Header:   Authorization: Bearer <token>
- */
-export const getDiaryNotes = async (): Promise<DiaryNote[]> => {
-  const response = await api.get<DiaryNote[]>('/diary-notes');
-  return response.data;
-};
+// Diary
+export const getDiaryNotes = (userId) => api.get('/diary-notes', authHeader(userId));
+export const createDiaryNote = (userId, data) => api.post('/diary-notes', data, authHeader(userId));
+export const updateDiaryNote = (userId, id, data) => api.put(`/diary-notes/${id}`, data, authHeader(userId));
+export const deleteDiaryNote = (userId, id) => api.delete(`/diary-notes/${id}`, authHeader(userId));
 
-/**
- * Tạo ghi chú mới.
- * Endpoint: POST /api/diary-notes
- */
-export const createDiaryNote = async (data: { title: string; content: string }): Promise<DiaryNote> => {
-  const response = await api.post<DiaryNote>('/diary-notes', data);
-  return response.data;
-};
-
-/**
- * Cập nhật ghi chú.
- * Endpoint: PUT /api/diary-notes/{id}
- */
-export const updateDiaryNote = async (
-  id: string,
-  data: { title: string; content: string }
-): Promise<DiaryNote> => {
-  const response = await api.put<DiaryNote>(`/diary-notes/${id}`, data);
-  return response.data;
-};
-
-/**
- * Xóa ghi chú.
- * Endpoint: DELETE /api/diary-notes/{id}
- */
-export const deleteDiaryNote = async (id: string): Promise<void> => {
-  await api.delete(`/diary-notes/${id}`);
-};
+// Alerts
+export const getAlerts = (userId) => api.get('/alerts', authHeader(userId));
+export const getAlertCount = (userId) => api.get('/alerts/count', authHeader(userId));
+export const deleteAlert = (userId, id) => api.delete(`/alerts/${id}`, authHeader(userId));
 
 export default api;

@@ -1,50 +1,40 @@
 package com.iomt.dashboard.components.alert;
 
+import lombok.Data;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
+
+import java.time.Instant;
+
 /**
- * ============================================================
- * AlertEntity — Entity: Canh bao suc khoe
- * ============================================================
+ * Entity: Canh bao suc khoe tu dong.
+ * Collection: "alerts"
  *
- * COLLECTION: "alerts"
- *
- * CAC TRUONG:
+ * Cac truong:
  *    - id        : ObjectId
  *    - userId    : ID nguoi dung
  *    - label     : Loai: "Stress" | "Fever"
  *    - message   : Noi dung chi tiet
  *    - timestamp : Thoi diem xay ra
- *    - isRead    : Da doc chua (default: false)
- *
- * VI DU DOCUMENT:
- *    {
- *        "_id": ObjectId("..."),
- *        "userId": "65f...",
- *        "label": "Stress",
- *        "message": "Phat hien trang thai Stress luc 10:00 ngay 23/03/2026",
- *        "timestamp": ISODate("2026-03-23T10:00:00Z"),
- *        "isRead": false
- *    }
- *
- * CRUD: Read + Delete
- *    Tao Alert: tu dong boi he thong (AI), khong co API tao.
+ *    - isRead    : Da doc chua (mac dinh: false)
  */
+@Data
+@Document(collection = "alerts")
 public class AlertEntity {
 
-    // @Id
-    // private String id;
+    @Id
+    public String id;
 
-    // @Field("user_id")
-    // private String userId;
+    @Field("user_id")
+    public String userId;
 
-    // @Field("label")
-    // private String label;
+    public String label;
 
-    // @Field("message")
-    // private String message;
+    public String message;
 
-    // @Field("timestamp")
-    // private Instant timestamp;
+    public Instant timestamp;
 
-    // @Field("is_read")
-    // private Boolean isRead;
+    @Field("is_read")
+    public Boolean isRead;
 }

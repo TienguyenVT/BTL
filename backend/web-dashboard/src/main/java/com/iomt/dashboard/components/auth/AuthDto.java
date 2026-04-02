@@ -1,43 +1,41 @@
 package com.iomt.dashboard.components.auth;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * DTO: Truyen nhan du lieu Auth (dang ky / dang nhap).
+ *
+ * Request (dang ky):
+ *    - email    : bat buoc
+ *    - password : bat buoc
+ *    - name     : bat buoc
+ *
+ * Request (dang nhap):
+ *    - email    : bat buoc
+ *    - password : bat buoc
+ *
+ * Response:
+ *    - id      : tra ve sau khi dang ky / dang nhap thanh cong
+ *    - name    : tra ve sau khi dang ky / dang nhap thanh cong
+ *    - message : thong bao thanh cong hoac loi
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class AuthDto {
 
-    // ── Register request ──────────────────────────────────────────
-    @NotBlank(message = "Email la bat buoc")
-    @Email(message = "Email khong dung dinh dang")
-    private String email;
+    // --- Request fields ---
+    public String email;
+    public String password;
+    public String name;
 
-    @NotBlank(message = "Mat khau la bat buoc")
-    @Size(min = 6, message = "Mat khau phai it nhat 6 ky tu")
-    private String password;
+    // --- Response fields ---
+    public String id;
+    public String message;
 
-    private String name;  // nullable for login
-
-    // ── Response fields ───────────────────────────────────────────
-    private String id;
-    private String token;  // null khi register, co khi login
-
-    // ── Factory methods ───────────────────────────────────────────
-    public static AuthDto fromEntity(AuthEntity entity, String token) {
-        AuthDto dto = new AuthDto();
-        dto.setId(entity.getId());
-        dto.setEmail(entity.getEmail());
-        dto.setName(entity.getName());
-        dto.setToken(token);
-        return dto;
-    }
-
-    public static AuthDto fromEntity(AuthEntity entity) {
-        return fromEntity(entity, null);
+    public void setMessage(String msg) {
+        this.message = msg;
     }
 }

@@ -1,11 +1,12 @@
 package com.iomt.dashboard.components.diary;
 
+import com.iomt.dashboard.common.UserUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Sort;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -45,7 +46,7 @@ public class DiaryController {
     }
 
     /** Lấy tất cả ghi chú của user (mới nhất trước) */
-    private List<DiaryDto> getAll(String userId) {
+    private List<DiaryDto> findAllByUserId(String userId) {
         Query query = new Query(Criteria.where("user_id").is(userId))
                 .with(Sort.by(Sort.Direction.DESC, "created_at"));
         return mongoTemplate.find(query, DiaryNote.class)
@@ -74,8 +75,7 @@ public class DiaryController {
             @Valid @RequestBody DiaryDto dto,
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
-        // Fallback: nếu không có header, dùng user cố định (demo)
-        String uid = (userId != null && !userId.isBlank()) ? userId : "demo_user";
+        String uid = UserUtils.extractUserId(userId);
 
         DiaryDto created = create(uid, dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
@@ -89,8 +89,8 @@ public class DiaryController {
     public ResponseEntity<List<DiaryDto>> getAll(
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
-        String uid = (userId != null && !userId.isBlank()) ? userId : "demo_user";
-        return ResponseEntity.ok(getAll(uid));
+        String uid = UserUtils.extractUserId(userId);
+        return ResponseEntity.ok(findAllByUserId(uid));
     }
 
     /**
@@ -102,7 +102,7 @@ public class DiaryController {
             @PathVariable String id,
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
-        String uid = (userId != null && !userId.isBlank()) ? userId : "demo_user";
+        String uid = UserUtils.extractUserId(userId);
         return findByIdAndUserId(id, uid)
                 .map(note -> ResponseEntity.ok(DiaryDto.fromEntity(note)))
                 .orElse(ResponseEntity.notFound().build());
@@ -118,7 +118,7 @@ public class DiaryController {
             @RequestBody DiaryDto dto,
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
-        String uid = (userId != null && !userId.isBlank()) ? userId : "demo_user";
+        String uid = UserUtils.extractUserId(userId);
 
         return findByIdAndUserId(id, uid)
                 .map(note -> {
@@ -143,7 +143,7 @@ public class DiaryController {
             @PathVariable String id,
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
-        String uid = (userId != null && !userId.isBlank()) ? userId : "demo_user";
+        String uid = UserUtils.extractUserId(userId);
 
         return findByIdAndUserId(id, uid)
                 .map(note -> {

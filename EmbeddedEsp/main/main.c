@@ -133,7 +133,7 @@ void display_task(void *pvParameters) {
                 ssd1306_draw_string(&dev, 0, 2, "Adjust to 2200   ");
 
                 if (data->gsr_raw > 0) {
-                    snprintf(buf, sizeof(buf), "Raw: %-5d     ", data->gsr_raw);
+                    snprintf(buf, sizeof(buf), "Raw: %-5d     ", (int)data->gsr_raw);
                 } else {
                     snprintf(buf, sizeof(buf), "Raw: ----       ");
                 }
@@ -142,7 +142,7 @@ void display_task(void *pvParameters) {
                 if (data->calibrate_done) {
                     snprintf(buf, sizeof(buf), "GSR: %-5d     ", data->gsr);
                     ssd1306_draw_string(&dev, 0, 5, buf);
-                    snprintf(buf, sizeof(buf), "Offset: %-5d   ", data->gsr_offset);
+                    snprintf(buf, sizeof(buf), "Offset: %-5d   ", (int)data->gsr_offset);
                     ssd1306_draw_string(&dev, 0, 6, buf);
                 } else {
                     ssd1306_draw_string(&dev, 0, 5, "GSR: --        ");
@@ -175,7 +175,7 @@ void display_task(void *pvParameters) {
                 ssd1306_draw_string(&dev, 0, 6, buf);
 
                 if (data->calibrate_done) {
-                    snprintf(buf, sizeof(buf), "OFFSET:%-5d   ", data->gsr_offset);
+                    snprintf(buf, sizeof(buf), "OFFSET:%-5d   ", (int)data->gsr_offset);
                 } else {
                     snprintf(buf, sizeof(buf), "NOT CALIBRATED ");
                 }
@@ -218,7 +218,7 @@ void monitor_task(void *pvParameters) {
                 printf("Mode:%d,BPM:%d,SpO2:%d,GSR:%d,Ambient:%.2f,BodyTemp:%.2f,Conf:%d,CalOffset:%d\n",
                        data->mode, pub_bpm, pub_spo2, pub_gsr,
                        data->ambient_temp, pub_body, data->measurement_confidence,
-                       data->gsr_offset);
+                       (int)data->gsr_offset);
             }
             last_serial_log_time = current_time;
         }

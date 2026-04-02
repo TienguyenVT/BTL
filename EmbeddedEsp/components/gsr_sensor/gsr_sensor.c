@@ -14,13 +14,6 @@ static const char *NVS_NS = "gsr_cal";
 // ADC handle cho GSR
 static adc_oneshot_unit_handle_t gsr_adc_handle = NULL;
 
-// ADC handle cho biến trở calibration
-static adc_oneshot_unit_handle_t cal_adc_handle = NULL;
-
-// Timer debounce cho nút calibrate
-static uint32_t s_cal_button_press_time = 0;
-static bool s_cal_button_was_pressed = false;
-
 // Lưu calibration offset vào NVS (flash)
 static void save_calibration_to_nvs(health_data_t *data) {
     nvs_handle_t nvs;
@@ -47,26 +40,12 @@ static void load_calibration_from_nvs(health_data_t *data) {
     }
     nvs_get_i32(nvs, "gsr_offset", &data->gsr_offset);
     nvs_get_i32(nvs, "gsr_baseline", &data->gsr_baseline);
-    int done = 0;
+    int32_t done = 0;
     nvs_get_i32(nvs, "calibrate_done", &done);
     data->calibrate_done = (done == 1);
     nvs_close(nvs);
     ESP_LOGI(TAG, "Loaded from NVS: offset=%d, baseline=%d, done=%d",
              data->gsr_offset, data->gsr_baseline, data->calibrate_done);
-}
-
-// Đọc giá trị biến trở calibration (lấy trung bình nhiều mẫu)
-static int read_calibration_pot(void) {
-    if (cal_adc_handle == NULL) return 0;
-
-    int sum = 0;
-    for (int i = 0; i < CAL_POT_SAMPLE_SIZE; i++) {
-        int val = 0;
-        ESP_ERROR_CHECK(adc_oneshot_read(cal_adc_handle, CAL_ADC_CHANNEL, &val));
-        sum += val;
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-    return sum / CAL_POT_SAMPLE_SIZE;
 }
 
 // Bắt đầu calibrate: đọc GSR thực tế của user → tính offset → lưu
@@ -165,20 +144,7 @@ void gsr_sensor_task(void *pvParameters) {
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(gsr_adc_handle, GSR_ADC_CHANNEL, &gsr_config));
 
-    // === Khởi tạo ADC cho biến trở calibration ===
-    adc_oneshot_unit_init_cfg_t init_config_cal = {
-        .unit_id = CAL_ADC_UNIT,
-        .ulp_mode = ADC_ULP_MODE_DISABLE,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config_cal, &cal_adc_handle));
-
-    adc_oneshot_chan_cfg_t cal_config = {
-        .bitwidth = ADC_BITWIDTH_DEFAULT,
-        .atten = ADC_ATTEN_DB_12,
-    };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(cal_adc_handle, CAL_ADC_CHANNEL, &cal_config));
-
-    ESP_LOGI(TAG, "GSR ADC=CH%d, Cal-Pot ADC=CH%d", GSR_ADC_CHANNEL, CAL_ADC_CHANNEL);
+    ESP_LOGI(TAG, "GSR ADC=CH%d", GSR_ADC_CHANNEL);
 
     while (1) {
         // Chờ WiFi kết nối

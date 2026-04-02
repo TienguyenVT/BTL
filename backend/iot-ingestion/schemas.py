@@ -21,6 +21,16 @@ class PredictRequest(BaseModel):
     body_temp: float = Field(..., description="Nhiệt độ cơ thể (MCP9808)")
     gsr_adc: float = Field(..., description="Điện trở da - Galvanic Skin Response (ADC)")
 
+    # ── DHT11 fields (room environment) ─────────────────────────────
+    room_temp: float = Field(
+        default=0.0,
+        description="Nhiệt độ phòng (DHT11, Celsius)"
+    )
+    humidity: float = Field(
+        default=0.0,
+        description="Độ ẩm không khí (DHT11, %)"
+    )
+
     # ── Engineered features (computed by Node-RED, mirrors train_model.py) ──
     bpm_spo2_ratio: float = Field(..., description="bpm / (spo2 + eps)")
     temp_gsr_interaction: float = Field(..., description="body_temp * gsr_adc / 1000")
@@ -31,6 +41,15 @@ class PredictRequest(BaseModel):
     gsr_deviation: float = Field(..., description="abs(gsr_adc - 2200)")
     physiological_stress_index: float = Field(
         ..., description="(bpm - 75)/75 + (gsr_adc - 2200)/2200"
+    )
+    # ── DHT11 engineered features ───────────────────────────────────
+    heat_index: float = Field(
+        default=0.0,
+        description="Chỉ số nhiệt = body_temp + 0.05 * humidity (DHT11)"
+    )
+    comfort_index: float = Field(
+        default=0.0,
+        description="Chỉ số thoải mái môi trường, -1..1 (DHT11)"
     )
 
     # ── Metadata ─────────────────────────────────────────────────────
@@ -59,6 +78,7 @@ class PredictRequest(BaseModel):
     model_config = {"json_schema_extra": {
         "example": {
             "bpm": 75.0, "spo2": 98.0, "body_temp": 36.5, "gsr_adc": 2200.0,
+            "room_temp": 25.0, "humidity": 60.0,
             "bpm_spo2_ratio": 0.7653,
             "temp_gsr_interaction": 80.3,
             "bpm_temp_product": 2737.5,
@@ -67,6 +87,8 @@ class PredictRequest(BaseModel):
             "temp_deviation": 0.3,
             "gsr_deviation": 0.0,
             "physiological_stress_index": 0.0,
+            "heat_index": 36.5,
+            "comfort_index": 0.75,
             "device_id": "esp32_001",
             "timestamp": 1711612800000
         }

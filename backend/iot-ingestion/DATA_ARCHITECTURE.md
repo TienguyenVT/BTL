@@ -60,15 +60,17 @@ esp32/health/data
 
 ### Payload ESP32 gửi lên (JSON)
 
+> **Lưu ý về timestamp**: ESP32 firmware thực tế gửi format string `"YYYY:MM:DD - HH:MM:SS"` (ví dụ: `"2026:03:31 - 13:49:16"`), **không phải** Unix milliseconds. Node-RED chấp nhận cả 2 format.
+
 ```json
 {
-  "device_id": "ESP32_001",
-  "mode": 1,
-  "timestamp": 1711612800000,
-  "bpm": 75.5,
-  "spo2": 98.2,
-  "body_temp": 36.7,
-  "gsr_adc": 2250.0,
+  "device_id": "esp32_iot_health_01",
+  "mode": 2,
+  "timestamp": "2026:03:31 - 13:49:16",
+  "bpm": 83,
+  "spo2": 99,
+  "body_temp": 36.5,
+  "gsr_adc": 1960,
   "dht11_room_temp": 27.5,
   "dht11_humidity": 65.0,
   "confidence": 0.92,
@@ -94,7 +96,7 @@ esp32/health/data
 
 ### Trường KHÔNG gửi qua MQTT
 - Các **engineered features** (8 features) — Node-RED tự tính
-- **predicted_label** — FastAPI trả về sau khi predict
+- **`predicted_label`**, **`prediction.confidence`** — FastAPI trả về sau khi predict
 
 ### Tầng này dùng để làm gì
 - **Debug/lỗi**: Khi hệ thống báo lỗi, cần kiểm tra payload gốc từ ESP32

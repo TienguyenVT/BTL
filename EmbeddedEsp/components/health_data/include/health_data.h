@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/types.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 
@@ -42,9 +43,9 @@ typedef struct {
     measurement_quality_t measurement_quality;
 
     // GSR calibration (personal baseline)
-    int gsr_raw;             // Giá trị GSR thô từ ADC
-    int gsr_baseline;        // Baseline mà admin set = 2200 (cố định)
-    int gsr_offset;          // Offset = gsr_baseline - gsr_raw (khi calibrate)
+    int32_t gsr_raw;             // Giá trị GSR thô từ ADC
+    int32_t gsr_baseline;        // Baseline mà admin set = 2200 (cố định)
+    int32_t gsr_offset;          // Offset = gsr_baseline - gsr_raw (khi calibrate)
 
     // Trạng thái hệ thống
     system_mode_t mode;

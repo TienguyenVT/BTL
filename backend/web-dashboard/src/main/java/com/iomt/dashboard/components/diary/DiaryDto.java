@@ -1,11 +1,5 @@
 package com.iomt.dashboard.components.diary;
 
-import jakarta.validation.constraints.NotBlank;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-
 import java.time.Instant;
 
 /**
@@ -21,25 +15,56 @@ import java.time.Instant;
  *   - content   : nội dung
  *   - createdAt : thời điểm tạo (null khi request)
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 public class DiaryDto {
 
     /** ID ghi chú — chỉ có trong response, null khi tạo mới */
     private String id;
 
     /** Tiêu đề ghi chú — bắt buộc khi tạo/sửa */
-    @NotBlank(message = "Tiêu đề không được trống")
     private String title;
 
     /** Nội dung chi tiết — bắt buộc khi tạo/sửa */
-    @NotBlank(message = "Nội dung không được trống")
     private String content;
 
     /** Thời điểm tạo — chỉ có trong response */
     private Instant createdAt;
+
+    public DiaryDto() {}
+
+    public DiaryDto(String id, String title, String content, Instant createdAt) {
+        this.id = id;
+        this.title = title;
+        this.content = content;
+        this.createdAt = createdAt;
+    }
+
+    // ── Getters ──────────────────────────────────────────
+    public String getId() { return id; }
+    public String getTitle() { return title; }
+    public String getContent() { return content; }
+    public Instant getCreatedAt() { return createdAt; }
+
+    // ── Setters ──────────────────────────────────────────
+    public void setId(String id) { this.id = id; }
+    public void setTitle(String title) { this.title = title; }
+    public void setContent(String content) { this.content = content; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    // ── Builder ──────────────────────────────────────────
+    public static Builder builder() { return new Builder(); }
+
+    public static class Builder {
+        private String id;
+        private String title;
+        private String content;
+        private Instant createdAt;
+
+        public Builder id(String id) { this.id = id; return this; }
+        public Builder title(String title) { this.title = title; return this; }
+        public Builder content(String content) { this.content = content; return this; }
+        public Builder createdAt(Instant createdAt) { this.createdAt = createdAt; return this; }
+        public DiaryDto build() { return new DiaryDto(id, title, content, createdAt); }
+    }
 
     // ── Factory methods ──────────────────────────────────────────
 

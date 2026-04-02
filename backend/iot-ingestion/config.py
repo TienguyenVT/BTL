@@ -19,9 +19,14 @@ class Settings:
     MONGO_DB_NAME: str = os.getenv("MONGO_DB_NAME", "iomt_health_monitor")
 
     # Tên các collection trong MongoDB
-    TRAINING_COLLECTION: str = "training_health_data" # Dữ liệu mẫu (CSV sau khi làm sạch) dùng để huấn luyện
-    REALTIME_COLLECTION: str = "realtime_health_data" # Dữ liệu thực MQTT sau khi dự đoán nhãn
-    RAW_SENSOR_COLLECTION: str = "raw_sensor"          # Data Lake backup (TTL 30 ngày)
+    TRAINING_COLLECTION: str = "training_health_data" # Du lieu mau (CSV sau khi lam sach) dung de huan luyen
+    REALTIME_COLLECTION: str = "realtime_health_data"  # Datawarehouse: 12 engineered features + DHT11
+    DATALAKE_COLLECTION: str = "datalake_raw"          # Data Lake: raw MQTT payload + rich metadata (khong TTL)
+    FINAL_RESULT_COLLECTION: str = "final_result"     # Ket qua cuoi cung: sensor data + label + timestamp
+
+    # ── DHT11 Sensor (room environment) ──────────────────────────────────────
+    DHT11_ROOM_TEMP_FIELD: str = "room_temp"  # ten truong nhiet do phong
+    DHT11_HUMIDITY_FIELD: str = "humidity"    # ten truong do am
 
     # ── MQTT Broker ──────────────────────────────────────────────────────
     MQTT_BROKER_HOST: str = os.getenv("MQTT_BROKER_HOST", "localhost")

@@ -1,45 +1,35 @@
 package com.iomt.dashboard.components.profile;
 
+import lombok.Data;
+import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
+
+import java.time.Instant;
+
 /**
- * ============================================================
- * ProfileEntity — Entity: Thong tin sinh truc hoc
- * ============================================================
+ * Entity: Thong tin sinh truc hoc cua nguoi dung.
+ * Collection: "profiles"
  *
- * COLLECTION: "profiles"
- *
- * CAC TRUONG:
+ * Cac truong:
  *    - userId   : ID nguoi dung (unique, khong co @Id)
  *    - age      : Tuoi (nullable)
  *    - height   : Chieu cao cm (nullable)
  *    - weight   : Can nang kg (nullable)
- *    - updatedAt: Thoi diem cap nhat
- *
- * VI DU DOCUMENT:
- *    {
- *        "userId": "65f...",
- *        "age": 25,
- *        "height": 170.5,
- *        "weight": 65.0,
- *        "updatedAt": ISODate("2026-03-23T10:00:00Z")
- *    }
- *
- * CRUD: Read (GET) + Update (PUT)
- *    Khong co Delete vi profile la thong tin co ban.
+ *    - updatedAt: Thoi diem cap nhat gan nhat
  */
+@Data
+@Document(collection = "profiles")
 public class ProfileEntity {
 
-    // @Field("user_id")
-    // private String userId;   <- unique index
+    @Field("user_id")
+    public String userId;
 
-    // @Field("age")
-    // private Integer age;
+    public Integer age;
 
-    // @Field("height")
-    // private Double height;
+    public Double height;
 
-    // @Field("weight")
-    // private Double weight;
+    public Double weight;
 
-    // @Field("updated_at")
-    // private Instant updatedAt;
+    @Field("updated_at")
+    public Instant updatedAt;
 }

@@ -1,45 +1,45 @@
 package com.iomt.dashboard.components.device;
 
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
+
+import java.time.Instant;
+
 /**
- * ============================================================
- * DeviceEntity — Entity: Thiet bi ESP32
- * ============================================================
+ * Entity: Thiet bi ESP32.
+ * Collection: "devices"
  *
- * COLLECTION: "devices"
- *
- * CAC TRUONG:
+ * Cac truong:
  *    - id          : ObjectId
  *    - userId      : ID nguoi dung
  *    - macAddress  : Dia chi MAC ESP32 (unique)
- *    - name        : Ten thiet bi (optional)
+ *    - name        : Ten thiet bi
  *    - createdAt   : Thoi diem dang ky
- *
- * VI DU DOCUMENT:
- *    {
- *        "_id": ObjectId("..."),
- *        "userId": "65f...",
- *        "macAddress": "AA:BB:CC:DD:EE:FF",
- *        "name": "Thiet bi nha tien",
- *        "createdAt": ISODate("2026-03-23T10:00:00Z")
- *    }
- *
- * CRUD: Create + Read + Delete
  */
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Document(collection = "devices")
 public class DeviceEntity {
 
-    // @Id
-    // private String id;
+    @Id
+    public String id;
 
-    // @Field("user_id")
-    // private String userId;
+    @Field("user_id")
+    public String userId;
 
-    // @Field("mac_address")
-    // @Indexed(unique = true)
-    // private String macAddress;
+    @Indexed(unique = true)
+    @Field("mac_address")
+    public String macAddress;
 
-    // @Field("name")
-    // private String name;
+    @Field("name")
+    public String name;
 
-    // @Field("created_at")
-    // private Instant createdAt;
+    @Field("created_at")
+    public Instant createdAt;
 }

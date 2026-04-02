@@ -290,11 +290,12 @@ def generate_esp_data(user_config):
 
             predicted_label = current_state
             
-            # Simulated Confidence probability
+            # Simulated PPG confidence probability
+            esp_confidence = final_confidence / 100.0  # ESP32's confidence field (PPG quality)
             if final_confidence == 100:
-                probability = round(random.uniform(0.70, 0.99), 4)
+                probability = round(random.uniform(0.70, 0.99), 4)  # ML prediction confidence
             else:
-                probability = round(random.uniform(0.20, 0.60), 4)
+                probability = round(random.uniform(0.20, 0.60), 4)  # ML prediction confidence
 
             ingested_at = (timestamp + timedelta(milliseconds=random.randint(200, 1500))).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + "+00:00"
             _id_hex = uuid.uuid4().hex[:24]
@@ -314,6 +315,10 @@ def generate_esp_data(user_config):
                 'body_temp': final_temp,
                 'gsr_adc': final_gsr,
                 'mode': 2,
+                'dht11_room_temp': round(current_ext_temp, 2),
+                'dht11_humidity': round(current_ext_humid, 1),
+                'confidence': esp_confidence,
+                'dht11_bias': round(random.uniform(-0.5, 0.5), 2),
                 'bpm_spo2_ratio': bpm_spo2_ratio,
                 'temp_gsr_interaction': temp_gsr_interaction,
                 'bpm_temp_product': bpm_temp_product,

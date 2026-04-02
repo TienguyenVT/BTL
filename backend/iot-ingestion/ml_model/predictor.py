@@ -108,6 +108,12 @@ class RealtimePredictor:
                 'spo2': float(data.get('spo2', 0)),
                 'body_temp': float(data.get('body_temp', 0)),
                 'gsr_adc': float(data.get('gsr_adc', 0)),
+                # DHT11 — default 0 neu khong co, model cu van hoat dong
+                'room_temp': float(data.get('room_temp', 0)),
+                'humidity': float(data.get('humidity', 0)),
+                # DHT11 engineered features — default 0 neu khong co
+                'heat_index': float(data.get('heat_index', 0)),
+                'comfort_index': float(data.get('comfort_index', 0)),
             }])
 
             # Tạo engineered features

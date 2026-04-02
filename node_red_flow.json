@@ -22,7 +22,9 @@
         "x": 170,
         "y": 200,
         "wires": [
-            ["json_parse_node"]
+            [
+                "json_parse_node"
+            ]
         ]
     },
     {
@@ -36,7 +38,9 @@
         "x": 390,
         "y": 200,
         "wires": [
-            ["func_filter_normalize"]
+            [
+                "func_filter_normalize"
+            ]
         ]
     },
     {
@@ -44,7 +48,7 @@
         "type": "function",
         "z": "e2f1d4b6.91b5c",
         "name": "1. Filter & Normalize",
-        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 1: Filter & Normalize (v3)\n// - Maps ESP32 'gsr' → 'gsr_adc'\n// - Adds default device_id\n// - Allows value=0 (sensor not ready yet)\n// - Only rejects truly impossible non-zero values\n// ══════════════════════════════════════════════════════════\n\nvar d = msg.payload;\nif (!d || typeof d !== 'object') {\n    return null;\n}\n\n// 1. Map ESP32 field names\nif (d.gsr !== undefined && d.gsr_adc === undefined) {\n    d.gsr_adc = d.gsr;\n}\n\n// 2. Default device_id\nif (!d.device_id) {\n    d.device_id = 'esp32_iot_health_01';\n}\n\n// 3. Default missing sensor values to 0\nd.bpm       = (d.bpm !== undefined)       ? d.bpm       : 0;\nd.spo2      = (d.spo2 !== undefined)      ? d.spo2      : 0;\nd.body_temp = (d.body_temp !== undefined) ? d.body_temp : 0;\nd.gsr_adc   = (d.gsr_adc !== undefined)   ? d.gsr_adc   : 0;\n\n// 4. Cast to float\nvar bpm       = parseFloat(d.bpm);\nvar spo2      = parseFloat(d.spo2);\nvar body_temp = parseFloat(d.body_temp);\nvar gsr_adc   = parseFloat(d.gsr_adc);\n\n// 5. Outlier rejection: only reject NON-ZERO impossible values\n//    ESP32 sends 0 when sensor not ready — that's valid, let it through.\nif (bpm !== 0 && (bpm < 20 || bpm > 220)) {\n    node.warn('BPM out of range (' + bpm + ') — dropping');\n    return null;\n}\nif (spo2 !== 0 && (spo2 < 50 || spo2 > 100)) {\n    node.warn('SpO2 out of range (' + spo2 + ') — dropping');\n    return null;\n}\nif (body_temp !== 0 && (body_temp < 25 || body_temp > 45)) {\n    node.warn('Temp out of range (' + body_temp + ') — dropping');\n    return null;\n}\nif (gsr_adc < 0) {\n    node.warn('GSR negative (' + gsr_adc + ') — dropping');\n    return null;\n}\n\n// 6. Save raw backup for Data Lake\nmsg.raw_backup = {\n    device_id: String(d.device_id),\n    timestamp: d.timestamp || Date.now(),\n    mode: d.mode,\n    bpm: bpm,\n    spo2: spo2,\n    body_temp: body_temp,\n    gsr_adc: gsr_adc,\n    ingested_at: new Date()\n};\n\n// 7. Clean payload for next node\nmsg.payload = {\n    device_id: String(d.device_id),\n    timestamp: d.timestamp || Date.now(),\n    bpm: bpm,\n    spo2: spo2,\n    body_temp: body_temp,\n    gsr_adc: gsr_adc,\n    mode: d.mode\n};\n\nreturn msg;",
+        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 1: Filter & Normalize (v4)\n// - Maps ESP32 'gsr' → 'gsr_adc'\n// - Adds default device_id\n// - Allows value=0 (sensor not ready yet)\n// - Only rejects truly impossible non-zero values\n// - Supports BOTH ESP32 naming (dht11_room_temp, dht11_humidity,\n//   confidence, dht11_bias) AND simulator naming (room_temp,\n//   humidity) for backward compatibility\n// ══════════════════════════════════════════════════════════\n\nvar d = msg.payload;\nif (!d || typeof d !== 'object') {\n    return null;\n}\n\n// 1. Map ESP32 field names\nif (d.gsr !== undefined && d.gsr_adc === undefined) {\n    d.gsr_adc = d.gsr;\n}\n\n// 2. Default device_id\nif (!d.device_id) {\n    d.device_id = 'esp32_iot_health_01';\n}\n\n// 3. Default missing sensor values to 0\nd.bpm       = (d.bpm !== undefined)       ? d.bpm       : 0;\nd.spo2      = (d.spo2 !== undefined)      ? d.spo2      : 0;\nd.body_temp = (d.body_temp !== undefined) ? d.body_temp : 0;\nd.gsr_adc   = (d.gsr_adc !== undefined)   ? d.gsr_adc   : 0;\n\n// 3b. DHT11: room temperature & humidity\n//     ESP32 firmware sends: dht11_room_temp, dht11_humidity\n//     Simulator may send:    room_temp, humidity\n//     → Try ESP32 name first, fall back to no-prefix name\nd.room_temp = (d['dht11_room_temp'] !== undefined) ? d['dht11_room_temp'] :\n              (d.room_temp !== undefined)           ? d.room_temp           : 0;\nd.humidity  = (d['dht11_humidity']  !== undefined) ? d['dht11_humidity']  :\n              (d.humidity !== undefined)            ? d.humidity            : 0;\n\n// 3c. ESP32 extra fields: confidence & dht11_bias\n//     Default to 0 if not present (backward compat with old simulator data)\nd.confidence  = (d.confidence  !== undefined) ? d.confidence  : 0;\nd.dht11_bias = (d.dht11_bias !== undefined)  ? d.dht11_bias : 0;\n\n// 4. Cast to float\nvar bpm       = parseFloat(d.bpm);\nvar spo2      = parseFloat(d.spo2);\nvar body_temp = parseFloat(d.body_temp);\nvar gsr_adc   = parseFloat(d.gsr_adc);\nvar room_temp = parseFloat(d.room_temp);\nvar humidity  = parseFloat(d.humidity);\nvar confidence  = parseFloat(d.confidence);\nvar dht11_bias = parseFloat(d.dht11_bias);\n\n// 5. Outlier rejection: only reject NON-ZERO impossible values\n//    ESP32 sends 0 when sensor not ready — that's valid, let it through.\nif (bpm !== 0 && (bpm < 20 || bpm > 220)) {\n    node.warn('BPM out of range (' + bpm + ') — dropping');\n    return null;\n}\nif (spo2 !== 0 && (spo2 < 50 || spo2 > 100)) {\n    node.warn('SpO2 out of range (' + spo2 + ') — dropping');\n    return null;\n}\nif (body_temp !== 0 && (body_temp < 25 || body_temp > 45)) {\n    node.warn('Temp out of range (' + body_temp + ') — dropping');\n    return null;\n}\nif (gsr_adc < 0) {\n    node.warn('GSR negative (' + gsr_adc + ') — dropping');\n    return null;\n}\n// 5b. DHT11 validation: room_temp -40..80, humidity 0..100\nif (room_temp !== 0 && (room_temp < -40 || room_temp > 80)) {\n    node.warn('room_temp out of range (' + room_temp + ') — dropping');\n    return null;\n}\nif (humidity !== 0 && (humidity < 0 || humidity > 100)) {\n    node.warn('humidity out of range (' + humidity + ') — dropping');\n    return null;\n}\n\n// 6. Save raw backup for Data Lake (preserves ALL original ESP32 fields)\nmsg.raw_backup = {\n    device_id:      String(d.device_id),\n    timestamp:      d.timestamp || Date.now(),\n    mode:           d.mode,\n    bpm:            bpm,\n    spo2:           spo2,\n    body_temp:      body_temp,\n    gsr_adc:        gsr_adc,\n    dht11_room_temp: room_temp,   // always stored as dht11_room_temp\n    dht11_humidity:  humidity,    // always stored as dht11_humidity\n    confidence:       confidence,\n    dht11_bias:      dht11_bias,\n    ingested_at:     new Date()\n};\n\n// 7. Clean payload for next node\nmsg.payload = {\n    device_id:   String(d.device_id),\n    timestamp:   d.timestamp || Date.now(),\n    bpm:         bpm,\n    spo2:        spo2,\n    body_temp:   body_temp,\n    gsr_adc:     gsr_adc,\n    room_temp:   room_temp,\n    humidity:    humidity,\n    confidence:  confidence,\n    dht11_bias:  dht11_bias,\n    mode:        d.mode\n};\n\nreturn msg;",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -54,7 +58,9 @@
         "x": 640,
         "y": 200,
         "wires": [
-            ["func_feature_eng"]
+            [
+                "func_feature_eng"
+            ]
         ]
     },
     {
@@ -62,7 +68,7 @@
         "type": "function",
         "z": "e2f1d4b6.91b5c",
         "name": "2. Feature Engineering",
-        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 2: Feature Engineering\n// Computes 8 derived features to match train_model.py exactly.\n// Uses epsilon = 1e-6 to prevent division by zero.\n// ══════════════════════════════════════════════════════════\n\nvar d   = msg.payload;\nvar eps = 1e-6;\n\nvar bpm       = d.bpm;\nvar spo2      = d.spo2;\nvar body_temp = d.body_temp;\nvar gsr_adc   = d.gsr_adc;\n\n// ── 8 Engineered Features (mirroring train_model.py) ────\n\n// 1. bpm_spo2_ratio = bpm / (spo2 + eps)\nd.bpm_spo2_ratio = bpm / (spo2 + eps);\n\n// 2. temp_gsr_interaction = body_temp * gsr_adc / 1000\nd.temp_gsr_interaction = body_temp * gsr_adc / 1000;\n\n// 3. bpm_temp_product = bpm * body_temp\nd.bpm_temp_product = bpm * body_temp;\n\n// 4. spo2_gsr_ratio = spo2 / (gsr_adc + eps)\nd.spo2_gsr_ratio = spo2 / (gsr_adc + eps);\n\n// 5. bpm_deviation = abs(bpm - 75)\nd.bpm_deviation = Math.abs(bpm - 75);\n\n// 6. temp_deviation = abs(body_temp - 36.8)\nd.temp_deviation = Math.abs(body_temp - 36.8);\n\n// 7. gsr_deviation = abs(gsr_adc - 2200)\nd.gsr_deviation = Math.abs(gsr_adc - 2200);\n\n// 8. physiological_stress_index = (bpm - 75)/75 + (gsr_adc - 2200)/2200\nd.physiological_stress_index = (bpm - 75) / 75 + (gsr_adc - 2200) / 2200;\n\nmsg.payload = d;\nreturn msg;",
+        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 2: Feature Engineering\n// Computes 8 derived features to match train_model.py exactly.\n// Uses epsilon = 1e-6 to prevent division by zero.\n// ══════════════════════════════════════════════════════════\n\nvar d   = msg.payload;\nvar eps = 1e-6;\n\nvar bpm       = d.bpm;\nvar spo2      = d.spo2;\nvar body_temp = d.body_temp;\nvar gsr_adc   = d.gsr_adc;\nvar room_temp = d.room_temp;\nvar humidity  = d.humidity;\n\n// ── 8 Engineered Features (mirroring train_model.py) ────\n\n// 1. bpm_spo2_ratio = bpm / (spo2 + eps)\nd.bpm_spo2_ratio = bpm / (spo2 + eps);\n\n// 2. temp_gsr_interaction = body_temp * gsr_adc / 1000\nd.temp_gsr_interaction = body_temp * gsr_adc / 1000;\n\n// 3. bpm_temp_product = bpm * body_temp\nd.bpm_temp_product = bpm * body_temp;\n\n// 4. spo2_gsr_ratio = spo2 / (gsr_adc + eps)\nd.spo2_gsr_ratio = spo2 / (gsr_adc + eps);\n\n// 5. bpm_deviation = abs(bpm - 75)\nd.bpm_deviation = Math.abs(bpm - 75);\n\n// 6. temp_deviation = abs(body_temp - 36.8)\nd.temp_deviation = Math.abs(body_temp - 36.8);\n\n// 7. gsr_deviation = abs(gsr_adc - 2200)\nd.gsr_deviation = Math.abs(gsr_adc - 2200);\n\n// 8. physiological_stress_index = (bpm - 75)/75 + (gsr_adc - 2200)/2200\nd.physiological_stress_index = (bpm - 75) / 75 + (gsr_adc - 2200) / 2200;\n\n// 9. heat_index = body_temp + 0.05 * humidity (DHT11)\nd.heat_index = body_temp + 0.05 * humidity;\n\n// 10. comfort_index = based on room_temp + humidity (DHT11)\n//    0=uncomfortable, 1=comfortable, -1=cold/heat stress\nvar ideal_room_temp = 25; // comfortable room temp C\nvar ideal_humidity  = 60; // comfortable humidity %\nd.comfort_index = 1.0 - Math.abs(room_temp - ideal_room_temp) / 20\n                         - Math.abs(humidity  - ideal_humidity) / 100;\nd.comfort_index = Math.max(-1, Math.min(1, d.comfort_index));\n\nmsg.payload = d;\nreturn msg;",
         "outputs": 1,
         "timeout": "",
         "noerr": 0,
@@ -72,7 +78,9 @@
         "x": 900,
         "y": 200,
         "wires": [
-            ["func_store_before_http"]
+            [
+                "func_store_before_http"
+            ]
         ]
     },
     {
@@ -90,7 +98,9 @@
         "x": 1160,
         "y": 200,
         "wires": [
-            ["http_predict"]
+            [
+                "http_predict"
+            ]
         ]
     },
     {
@@ -109,20 +119,27 @@
         "authType": "",
         "senderr": true,
         "headers": [
-            { "keyType": "other", "keyValue": "Content-Type", "valueType": "other", "valueValue": "application/json" }
+            {
+                "keyType": "other",
+                "keyValue": "Content-Type",
+                "valueType": "other",
+                "valueValue": "application/json"
+            }
         ],
         "x": 1380,
         "y": 200,
         "wires": [
-            ["func_attach_label"]
+            [
+                "func_attach_label"
+            ]
         ]
     },
     {
         "id": "func_attach_label",
         "type": "function",
         "z": "e2f1d4b6.91b5c",
-        "name": "3. Attach Label & Fallback",
-        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 3: Attach Label & Fallback\n// Merges /predict response back onto sensorPayload.\n// If HTTP failed, sets label = null, confidence = null.\n// Outputs 2 messages: [0] = realtime_health_data, [1] = raw_sensor\n// ══════════════════════════════════════════════════════════\n\nvar sensor = msg.sensorPayload || {};\nvar httpResp = msg.payload;\nvar statusCode = msg.statusCode;\n\n// Merge prediction result (or fallback to null)\nif (statusCode === 200 && httpResp && httpResp.predicted_label) {\n    sensor.predicted_label = httpResp.predicted_label;\n    sensor.confidence      = httpResp.confidence;\n} else {\n    node.warn(\"HTTP /predict failed (status=\" + statusCode + \") — setting label to null\");\n    sensor.predicted_label = null;\n    sensor.confidence      = null;\n}\n\n// Add ingestion timestamp\nsensor.ingested_at = new Date();\n\n// ── Output 1: realtime_health_data (Datawarehouse) ──────\nvar msg1 = { payload: sensor };\n\n// ── Output 2: raw_sensor (Data Lake backup) ─────────────\nvar rawBackup = msg.raw_backup || {};\nvar msg2 = { payload: rawBackup };\n\nreturn [msg1, msg2];",
+        "name": "3. Build Data Lake & Strip Features",
+        "func": "// ══════════════════════════════════════════════════════════\n// Function Node 3: Attach Label & Build Data Lake (v4)\n//\n// Luong xu ly:\n//   - realtime_health_data: 12 engineered features (Datawarehouse)\n//   - datalake_raw: full raw MQTT payload + rich metadata (Data Lake)\n//\n// Data Lake schema:\n//   - source:       \"mqtt_esp32\" | \"rest_api\" | \"csv_batch\" | ...\n//   - source_topic: topic MQTT goc\n//   - device_id:    ESP32 device ID (hoac default)\n//   - timestamp:    Unix ms tu ESP32\n//   - mode:         ESP32 operation mode\n//   - raw_payload:  Tat ca cac truong nhan duoc tu MQTT\n//   - sensor:       Normalized sensor values (bpm, spo2, body_temp, gsr_adc)\n//   - data_quality: \"raw\" | \"normalized\" | \"outlier_rejected\"\n//   - schema_version: \"1.0\" — de track thay doi schema trong tuong lai\n//   - ingested_at:  Server timestamp khi nhan duoc message\n//   - processing_latency_ms: Thoi gian tu ESP32 gui den khi luu (ms)\n//\n// ══════════════════════════════════════════════════════════\n\nvar sensor = msg.sensorPayload || {};\nvar httpResp = msg.payload;\nvar statusCode = msg.statusCode;\nvar rawPayload = msg.raw_backup || {};\n\n// ── Merge prediction result onto stripped payload ──────────\nvar stripped = {};\nvar KEPT_FIELDS = [\n    \"bpm\",\"spo2\",\"body_temp\",\"gsr_adc\",\n    \"bpm_spo2_ratio\",\"temp_gsr_interaction\",\"bpm_temp_product\",\"spo2_gsr_ratio\",\n    \"bpm_deviation\",\"temp_deviation\",\"gsr_deviation\",\"physiological_stress_index\",\n    \"heat_index\",\"comfort_index\"  // DHT11 features\n];\nKEPT_FIELDS.forEach(function(f) {\n    if (sensor[f] !== undefined) { stripped[f] = sensor[f]; }\n});\n\n// ── Build Data Lake document (rich metadata) ─────────────────\nvar latencyMs = (rawPayload.timestamp)\n    ? (Date.now() - parseInt(rawPayload.timestamp))\n    : null;\n\nvar datalakeDoc = {\n    // ── Source identification ────────────────────────────────\n    source:         \"mqtt_esp32\",\n    source_topic:   \"ptit/health/data\",\n\n    // ── Device & timing ─────────────────────────────────────\n    device_id:      String(rawPayload.device_id || sensor.device_id || \"unknown\"),\n    timestamp:      rawPayload.timestamp || Date.now(),\n    mode:           rawPayload.mode !== undefined ? rawPayload.mode : null,\n\n    // ── Raw MQTT payload (original, untouched) ──────────────\n    //    Stores ALL ESP32 fields: bpm, spo2, body_temp, gsr_adc,\n    //    dht11_room_temp, dht11_humidity, confidence, dht11_bias\n    raw_payload:    JSON.parse(JSON.stringify(rawPayload)),\n\n    // ── Normalized sensor values ────────────────────────────\n    sensor: {\n        bpm:       rawPayload.bpm,\n        spo2:      rawPayload.spo2,\n        body_temp: rawPayload.body_temp,\n        gsr_adc:   rawPayload.gsr_adc,\n        dht11_room_temp: rawPayload.dht11_room_temp,\n        dht11_humidity:  rawPayload.dht11_humidity,\n        confidence:      rawPayload.confidence,\n        dht11_bias:      rawPayload.dht11_bias\n    },\n\n    // ── Engineered features (from feature engineering node) ─\n    features: {\n        bpm_spo2_ratio:             sensor.bpm_spo2_ratio,\n        temp_gsr_interaction:       sensor.temp_gsr_interaction,\n        bpm_temp_product:           sensor.bpm_temp_product,\n        spo2_gsr_ratio:             sensor.spo2_gsr_ratio,\n        bpm_deviation:              sensor.bpm_deviation,\n        temp_deviation:             sensor.temp_deviation,\n        gsr_deviation:              sensor.gsr_deviation,\n        physiological_stress_index: sensor.physiological_stress_index,\n        heat_index:               sensor.heat_index,\n        comfort_index:             sensor.comfort_index\n    },\n\n    // ── Prediction result ────────────────────────────────────\n    prediction: (statusCode === 200 && httpResp && httpResp.predicted_label)\n        ? {\n            label:      httpResp.predicted_label,\n            confidence: httpResp.confidence\n        }\n        : null,\n\n    // ── Pipeline metadata ───────────────────────────────────\n    data_quality:    rawPayload.bpm !== 0 && rawPayload.spo2 !== 0 && rawPayload.body_temp !== 0\n                        ? \"normalized\" : \"raw\",\n    schema_version:  \"1.1\",  // bumped: added dht11_room_temp, dht11_humidity, confidence, dht11_bias\n    ingested_at:      new Date(),\n    processing_latency_ms: latencyMs\n};\n\n// ── Output 1: realtime_health_data (Datawarehouse) ──────\n// Fields: 12 features only (MongoDB auto-adds _id on insert)\nvar msg1 = { payload: stripped };\n\n// ── Output 2: datalake_raw (Data Lake) ────────────────\nvar msg2 = { payload: datalakeDoc };\n\nreturn [msg1, msg2];\n",
         "outputs": 2,
         "timeout": "",
         "noerr": 0,
@@ -132,8 +149,14 @@
         "x": 1610,
         "y": 200,
         "wires": [
-            ["mongo_realtime", "debug_realtime"],
-            ["mongo_raw", "debug_raw"]
+            [
+                "mongo_realtime",
+                "debug_realtime"
+            ],
+            [
+                "mongo_raw",
+                "debug_raw"
+            ]
         ]
     },
     {
@@ -150,7 +173,9 @@
         "name": "Save → realtime_health_data",
         "x": 1910,
         "y": 160,
-        "wires": [[]]
+        "wires": [
+            []
+        ]
     },
     {
         "id": "mongo_raw",
@@ -158,15 +183,17 @@
         "z": "e2f1d4b6.91b5c",
         "clientNode": "mongo_client",
         "mode": "collection",
-        "collection": "raw_sensor",
+        "collection": "datalake_raw",
         "operation": "insertOne",
         "output": "toArray",
         "maxTimeMS": "0",
         "handleDocId": false,
-        "name": "Save → raw_sensor (TTL 30d)",
+        "name": "Save -> datalake_raw",
         "x": 1920,
         "y": 280,
-        "wires": [[]]
+        "wires": [
+            []
+        ]
     },
     {
         "id": "debug_realtime",
@@ -207,7 +234,7 @@
         "type": "comment",
         "z": "e2f1d4b6.91b5c",
         "name": "📋 Pipeline: MQTT → Filter → Features → /predict → MongoDB",
-        "info": "Architecture: Node-RED Streaming ETL\n\n1. MQTT In: ptit/health/data từ HiveMQ Cloud\n2. Filter & Normalize: Validate + outlier rejection\n3. Feature Engineering: 8 derived features (mirrors train_model.py)\n4. HTTP POST /predict: Python FastAPI ML endpoint\n5. Attach Label: Merge prediction result\n6. MongoDB Output:\n   - realtime_health_data: Labeled records (Datawarehouse)\n   - raw_sensor: Raw backup (Data Lake, TTL 30 ngày)\n\nLưu ý:\n- Python server phải chạy tại http://localhost:8000\n- HTTP timeout: mặc định Node-RED (5s), có thể giảm xuống 200ms nếu cần\n- Nhập lại MQTT credentials sau khi import (Security tab)",
+        "info": "Architecture: Node-RED Streaming ETL\n\n1. MQTT In: ptit/health/data tu HiveMQ Cloud\n2. Filter & Normalize: Validate + outlier rejection\n3. Feature Engineering: 8 derived features (mirrors train_model.py)\n4. HTTP POST /predict: Python FastAPI ML endpoint\n5. Build Data Lake: luu raw MQTT payload + rich metadata\n6. MongoDB Output:\n   - realtime_health_data: 12 engineered features (Datawarehouse)\n   - datalake_raw: raw payload + metadata (Data Lake, vĩnh viễn)\n\nData Lake Schema (datalake_raw):\n   source, source_topic, device_id, timestamp, mode,\n   raw_payload, sensor, features, prediction,\n   data_quality, schema_version, ingested_at, processing_latency_ms\n\nESP32 Payload fields:\n   device_id, mode, timestamp, bpm, spo2, body_temp, gsr_adc,\n   dht11_room_temp, dht11_humidity, confidence, dht11_bias\n\nLuu y:\n   - Python server phai chay tai http://localhost:8000\n   - Hay import lai MQTT credentials sau khi import flow",
         "x": 360,
         "y": 80,
         "wires": []
