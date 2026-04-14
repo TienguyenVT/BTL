@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { getSessionsHistory, getSessionById } from '../services/api';
+import { getSessionsHistory, getSessionById, getDevices } from '../services/api';
 import { format, startOfDay } from 'date-fns';
-import { Activity, WifiOff, Calendar, ChevronDown, ChevronUp, Clock } from 'lucide-react';
+import { Activity, WifiOff, Calendar, ChevronDown, ChevronUp, Clock, Cpu } from 'lucide-react';
 import { toast } from 'sonner';
 import SessionChart from '../components/SessionChart';
+import { useNavigate } from 'react-router-dom';
 
 const RANGES = [
   { label: '6h', hours: 6 },
@@ -16,6 +17,7 @@ const RANGES = [
 const labelColors = { Normal: '#22c55e', Stress: '#f59e0b', Fever: '#ef4444' };
 
 export default function HistoryPage() {
+  const navigate = useNavigate();
   const [range, setRange] = useState(168);
   const [sessions, setSessions] = useState([]);
   const [sessionDetail, setSessionDetail] = useState(null);
@@ -23,13 +25,36 @@ export default function HistoryPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState(null);
   const [expandedSessions, setExpandedSessions] = useState(new Set());
+  const [hasDevices, setHasDevices] = useState(null); // null = checking, true/false = result
+  const userId = localStorage.getItem('backendUserId');
+
+  // Check if user has registered devices
+  useEffect(() => {
+    const checkDevices = async () => {
+      if (!userId) {
+        setHasDevices(false);
+        return;
+      }
+      try {
+        const res = await getDevices(userId);
+        setHasDevices((res.data || []).length > 0);
+      } catch {
+        setHasDevices(false);
+      }
+    };
+    checkDevices();
+  }, [userId]);
 
   useEffect(() => {
     const fetchSessions = async () => {
+      if (hasDevices === false) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setError(null);
       try {
-        const res = await getSessionsHistory(range);
+        const res = await getSessionsHistory(range, userId);
         setSessions(res.data || []);
       } catch (err) {
         setError(err.response?.data?.message || err.message || 'Failed to load sessions');
@@ -38,7 +63,7 @@ export default function HistoryPage() {
       setLoading(false);
     };
     fetchSessions();
-  }, [range]);
+  }, [range, userId, hasDevices]);
 
   const toggleSession = async (sessionId) => {
     const isCurrentlyExpanded = expandedSessions.has(sessionId);
@@ -57,7 +82,7 @@ export default function HistoryPage() {
       if (!sessionDetail || sessionDetail.sessionId !== sessionId) {
         setLoadingDetail(true);
         try {
-          const res = await getSessionById(sessionId);
+          const res = await getSessionById(sessionId, userId);
           setSessionDetail(res.data);
         } catch (err) {
           toast.error('Failed to load session details');
@@ -92,6 +117,38 @@ export default function HistoryPage() {
   }, [sessions, expandedSessions]);
 
   const currentDetail = sessionDetail;
+
+  // Loading state while checking devices
+  if (hasDevices === null) {
+    return (
+      <div className="p-4 lg:p-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center py-20">
+          <div className="text-slate-500">Đang tải...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // User has no devices - show prompt
+  if (!hasDevices) {
+    return (
+      <div className="p-4 lg:p-6 max-w-3xl mx-auto text-center py-20">
+        <Cpu size={48} className="mx-auto text-slate-300 mb-4" />
+        <h2 className="text-xl font-semibold text-slate-700 mb-2">
+          Bạn chưa đăng ký thiết bị
+        </h2>
+        <p className="text-slate-500 mb-6">
+          Vui lòng thêm thiết bị ESP32 để xem dữ liệu sức khỏe của bạn.
+        </p>
+        <button
+          onClick={() => navigate('/devices')}
+          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+        >
+          Thêm thiết bị
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto">
@@ -291,10 +348,7 @@ export default function HistoryPage() {
       {!loading && sessions.length === 0 && (
         <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
           <Activity size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-600 font-medium">Không có dữ liệu lịch sử</p>
-          <p className="text-slate-400 text-sm mt-1">
-            Dữ liệu sẽ xuất hiện ở đây sau khi bạn sử dụng hệ thống cảm biến.
-          </p>
+          <p className="text-slate-600 font-medium">Không có dữ liệu</p>
         </div>
       )}
 

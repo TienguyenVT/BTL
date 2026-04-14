@@ -1,0 +1,281 @@
+---
+description: Kiến trúc và mẫu thiết kế cho driver cảm biến
+globs: **/*.c **/*.h
+alwaysApply: false
+---
+
+# Sensor Driver Architecture Pattern
+
+Trích xuất từ **EmbeddedEsp**: mô hình kiến trúc chuẩn cho mọi cảm biến trong hệ thống BTL.
+
+---
+
+## 1. Mô hình tổng thể — "Shared Data + EventGroup"
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    health_data_t / water_data_t              │
+│                  (singleton, global scope)                   │
+│  • Shared giữa TẤT CẢ các task                              │
+│  • Cập nhật bởi task A, đọc bởi task B/C                    │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+         ┌────────────┼────────────┐
+         │            │            │
+    ┌────▼────┐  ┌───▼────┐  ┌───▼────┐
+    │Task A   │  │Task B  │  │Task C  │
+    │(Sensor) │  │Display │  │Monitor │
+    │Ghi dữ  │  │Đọc &   │  │Đọc &   │
+    │liệu    │  │hiển thị│  │MQTT    │
+    └─────────┘  └────────┘  └────────┘
+         │
+    ┌────▼────────────────────────────┐
+    │         EventGroup                 │
+    │  wifi_manager bật WIFI_CONNECTED  │
+    │  Bit → Mở khóa mọi task sensor   │
+    └───────────────────────────────────┘
+```
+
+**Quy tắc:**
+- Dùng **singleton pattern**: 1 struct toàn cục duy nhất, truy cập qua `*_data_get()`.
+- Struct chứa **tất cả dữ liệu cảm biến + trạng thái hệ thống**.
+- **Không** dùng queue/hàm callback giữa các task — chỉ đọc/ghi struct.
+
+---
+
+## 2. Cấu trúc file Component cảm biến
+
+Mỗi cảm biến có đúng 4 file:
+
+| File | Vai trò |
+|------|---------|
+| `<sensor>.c` | Logic nghiệp vụ + FreeRTOS task |
+| `<sensor>.h` | Public API (khai báo task, hàm init) |
+| `include/<sensor>_config.h` | Macro cấu hình phần cứng (`#pragma once`) |
+| `CMakeLists.txt` | `idf_component_register` |
+
+### Mẫu `<sensor>_config.h`
+
+```c
+#pragma once
+#include "driver/gpio.h"   // Hoặc driver/i2c.h tùy cảm biến
+
+// Hardware pins
+#define SENSOR_PIN            GPIO_NUM_4
+#define SENSOR_ADC_UNIT       ADC_UNIT_1
+#define SENSOR_ADC_CHANNEL    ADC_CHANNEL_3
+
+// Algorithm params
+#define SENSOR_SAMPLE_SIZE    20
+#define SENSOR_THRESHOLD      100
+
+// Timing
+#define SENSOR_INTERVAL_MS    100
+```
+
+### Mẫu `<sensor>.h`
+
+```c
+#ifndef __SENSOR_H__
+#define __SENSOR_H__
+
+#include "sensor_config.h"
+
+// FreeRTOS task function
+void sensor_task(void *pvParameters);
+
+#endif // __SENSOR_H__
+```
+
+---
+
+## 3. Mẫu Driver — GPIO Interrupt (YF-S201 style)
+
+Dùng cho cảm biến tạo xung (encoder, flow meter, hall effect...).
+
+### Nguyên tắc ISR
+
+```c
+// 1. Biến volatile cho ISR + mutex/protect
+static volatile uint32_t s_pulse_count = 0;
+static portMUX_TYPE s_pulse_mutex = portMUX_INITIALIZER_UNLOCKED;
+
+// 2. ISR handler — IRAM_ATTR bắt buộc
+static void IRAM_ATTR pulse_isr(void *arg) {
+    portENTER_CRITICAL_ISR(&s_pulse_mutex);
+    s_pulse_count++;
+    portEXIT_CRITICAL_ISR(&s_pulse_mutex);
+}
+
+// 3. Init
+gpio_config_t io_conf = {
+    .pin_bit_mask = (1ULL << PIN),
+    .mode = GPIO_MODE_INPUT,
+    .pull_up_en = GPIO_PULLUP_ENABLE,
+    .intr_type = GPIO_INTR_POSEDGE,  // Hoặc NEGEDGE tùy cảm biến
+};
+gpio_config(&io_conf);
+gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+gpio_isr_handler_add(PIN, pulse_isr, NULL);
+```
+
+### Đọc an toàn từ Task
+
+```c
+static uint32_t get_and_reset_count(void) {
+    uint32_t count;
+    portENTER_CRITICAL(&s_pulse_mutex);
+    count = s_pulse_count;
+    s_pulse_count = 0;
+    portEXIT_CRITICAL(&s_pulse_mutex);
+    return count;
+}
+```
+
+---
+
+## 4. Mẫu Driver — I2C (MAX30105 style)
+
+Dùng cho cảm biến giao tiếp I2C (OLED, gia tốc kế, MAX30105...).
+
+### Nguyên tắc
+
+- **Mỗi I2C bus** có **mutex riêng** (`xSemaphoreCreateMutex()`).
+- Mọi thao tác I2C phải wrapped trong `xSemaphoreTake/MGive`.
+- Đặt `i2c_driver_install` trong `sensor_hub` hoặc `xxx_init()`.
+- **Retry logic** khi sensor chưa sẵn sàng sau khi cấp nguồn.
+
+```c
+// Retry init
+bool sensor_ok = false;
+for (int attempt = 1; attempt <= 10; attempt++) {
+    sensor_ok = xxx_begin(&sensor, port, speed);
+    if (sensor_ok) break;
+    ESP_LOGW(TAG, "Sensor not ready, retry in 500ms...");
+    vTaskDelay(pdMS_TO_TICKS(500));
+}
+configASSERT(sensor_ok); // Hoặc while(1) để treo task
+```
+
+### Đọc I2C an toàn
+
+```c
+// Luôn dùng mutex
+xSemaphoreTake(i2c_mutex_xxx, portMAX_DELAY);
+max30105_check(&sensor);
+xSemaphoreGive(i2c_mutex_xxx);
+```
+
+---
+
+## 5. Mẫu Driver — OneWire / GPIO Polling (DHT11 style)
+
+Dùng cho cảm biến dùng single-wire protocol.
+
+### Nguyên tắc
+
+- Timing cực kỳ chính xác → dùng `esp_timer_get_time()` và `esp_rom_delay_us()`.
+- **Vùng timing nhạy** phải nằm trong **Critical Section** (`portENTER_CRITICAL`).
+- **Vùng có `vTaskDelay`** phải **ngoài** critical section.
+- Luôn kiểm tra **checksum** sau khi đọc.
+
+### Cấu trúc 4 Phase
+
+```c
+// Phase 1: Gửi start signal (có vTaskDelay → NGOÀI critical)
+gpio_set_direction(PIN, OUTPUT);
+gpio_set_level(PIN, 0);
+vTaskDelay(pdMS_TO_TICKS(20));
+
+// Phase 2: Vào critical TRƯỚC KHI thả line
+portENTER_CRITICAL(&mux);
+gpio_set_level(PIN, 1);
+esp_rom_delay_us(30);
+gpio_set_direction(PIN, INPUT);
+// ... chờ response từ sensor ...
+
+// Phase 3: Đọc data trong critical
+uint8_t data[5] = {0};
+for (int i = 0; i < 5; i++) {
+    data[i] = read_byte();
+}
+portEXIT_CRITICAL(&mux);
+
+// Phase 4: Checksum ngoài critical
+if ((data[0] + data[1] + data[2] + data[3]) != data[4]) { /* error */ }
+```
+
+---
+
+## 6. Mẫu Driver — ADC (GSR style)
+
+```c
+// 1. Init ADC
+adc_oneshot_unit_init_cfg_t init_cfg = {
+    .unit_id = ADC_UNIT_1,
+    .ulp_mode = ADC_ULP_MODE_DISABLE,
+};
+ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_cfg, &handle));
+
+// 2. Config channel
+adc_oneshot_chan_cfg_t cfg = {
+    .bitwidth = ADC_BITWIDTH_DEFAULT,
+    .atten = ADC_ATTEN_DB_12,
+};
+ESP_ERROR_CHECK(adc_oneshot_config_channel(handle, channel, &cfg));
+
+// 3. Đọc nhiều mẫu + trung bình
+long sum = 0;
+for (int i = 0; i < SAMPLE_SIZE; i++) {
+    int val;
+    adc_oneshot_read(handle, channel, &val);
+    sum += val;
+    vTaskDelay(pdMS_TO_TICKS(2));
+}
+int raw = sum / SAMPLE_SIZE;
+```
+
+---
+
+## 7. Cấu hình ngắt GPIO trên ESP32-S3 vs ESP32
+
+| Tính năng | ESP32-S3 | ESP32 (WROOM-32) |
+|-----------|----------|------------------|
+| GPIO có ngắt | GPIO 0-21, 35-48 | GPIO 0-31 |
+| GPIO 4 | ✅ Hỗ trợ ngắt | ✅ Hỗ trợ ngắt |
+| GPIO 5 | ✅ Hỗ trợ ngắt | ✅ Hỗ trợ ngắt |
+| ISR trong flash | ❌ Không (IRAM bắt buộc) | ✅ Cho phép |
+
+**Quy tắc:** Luôn dùng `IRAM_ATTR` cho mọi ISR handler. Cờ `ESP_INTR_FLAG_IRAM` khi đăng ký.
+
+---
+
+## 8. State Machine trong Task
+
+Dùng enum + biến tĩnh để theo dõi trạng thái:
+
+```c
+typedef enum {
+    MODE_IDLE,
+    MODE_ACTIVE,
+    MODE_LEAK,
+} flow_mode_t;
+
+// Trong task
+static int active_cycles = 0;
+static int idle_cycles = 0;
+
+if (flow_rate >= THRESHOLD) {
+    idle_cycles = 0;
+    active_cycles++;
+    if (active_cycles >= CONFIRM_CYCLES) {
+        data->mode = MODE_ACTIVE;
+    }
+} else {
+    active_cycles = 0;
+    idle_cycles++;
+    if (idle_cycles >= IDLE_CYCLES) {
+        data->mode = MODE_IDLE;
+    }
+}
+```

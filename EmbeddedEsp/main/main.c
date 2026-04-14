@@ -243,10 +243,11 @@ void monitor_task(void *pvParameters) {
 
                 char payload[512];
                 snprintf(payload, sizeof(payload),
-                         "{\"timestamp\": \"%s\", \"mode\": %d, \"dht11_room_temp\": %.1f, \"dht11_humidity\": %d, "
+                         "{\"timestamp\": \"%s\", \"mac_address\": \"%s\", \"mode\": %d, "
+                         "\"dht11_room_temp\": %.1f, \"dht11_humidity\": %d, "
                          "\"body_temp\": %.1f, \"bpm\": %d, \"spo2\": %d, \"gsr\": %d, "
                          "\"confidence\": %d, \"dht11_bias\": %.3f}",
-                         time_str, data->mode, data->ambient_temp, data->humidity,
+                         time_str, data->mac_address, data->mode, data->ambient_temp, data->humidity,
                          pub_body, pub_bpm, pub_spo2, pub_gsr,
                          data->measurement_confidence, data->dht11_bias);
 

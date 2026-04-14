@@ -55,6 +55,9 @@ typedef struct {
     // Calibrate state
     bool calibrate_active;  // true khi đang ở chế độ calibrate
     bool calibrate_done;    // true khi đã calibrate xong
+
+    // MAC address (lấy sau khi WiFi kết nối thành công)
+    char mac_address[18];  // format: "XX:XX:XX:XX:XX:XX"
 } health_data_t;
 
 // Trả về con trỏ tới struct dữ liệu toàn cục (singleton)

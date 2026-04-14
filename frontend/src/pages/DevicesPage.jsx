@@ -67,8 +67,7 @@ export default function DevicesPage() {
         <div className="text-center py-16">
           <Cpu size={40} className="mx-auto text-slate-300 mb-3" />
           <p className="text-slate-500 font-medium">No devices registered</p>
-          <p className="text-slate-400 text-sm mt-1">Add an ESP32 device to start monitoring.</p>
-        </div>
+          </div>
       ) : (
         <div className="space-y-3">
           {devices.map((device) => (

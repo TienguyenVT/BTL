@@ -1,24 +1,49 @@
 import { useState, useEffect } from 'react';
-import { Activity, Droplet, Thermometer, RefreshCw, WifiOff, Clock } from 'lucide-react';
+import { Activity, Droplet, Thermometer, RefreshCw, WifiOff, Clock, Cpu } from 'lucide-react';
 import SessionChart from '../components/SessionChart';
-import { getLiveSession, getEnvironment } from '../services/api';
+import { getLiveSession, getEnvironment, getDevices } from '../services/api';
 import { format } from 'date-fns';
+import { useNavigate } from 'react-router-dom';
 
 const labelColors = { Normal: '#22c55e', Stress: '#f59e0b', Fever: '#ef4444' };
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [session, setSession] = useState(null);
   const [envData, setEnvData] = useState({ extTempC: null, extHumidityPct: null, timestamp: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [tick, setTick] = useState(0);
+  const [hasDevices, setHasDevices] = useState(null); // null = checking, true/false = result
+  const userId = localStorage.getItem('backendUserId');
+
+  // Check if user has registered devices
+  useEffect(() => {
+    const checkDevices = async () => {
+      if (!userId) {
+        setHasDevices(false);
+        return;
+      }
+      try {
+        const res = await getDevices(userId);
+        setHasDevices((res.data || []).length > 0);
+      } catch {
+        setHasDevices(false);
+      }
+    };
+    checkDevices();
+  }, [userId]);
 
   // Poll live session every 1 second (direct final_result query, no rebuild dependency)
   const fetchSession = async () => {
+    if (!userId || hasDevices === false) {
+      setLoading(false);
+      return;
+    }
     try {
       setError(null);
-      const res = await getLiveSession();
+      const res = await getLiveSession(userId);
       setSession(res.status === 204 ? null : res.data);
     } catch (err) {
       console.error('Failed to load session:', err);
@@ -41,19 +66,52 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    if (hasDevices === false) return;
     fetchSession();
     fetchEnv();
     // Poll every 1 second using /live endpoint (direct final_result query)
     const sessionInterval = setInterval(fetchSession, 1000);
     const envInterval = setInterval(fetchEnv, 1000);
     return () => { clearInterval(sessionInterval); clearInterval(envInterval); };
-  }, []);
+  }, [hasDevices, userId]);
 
   const records = session?.records || [];
   const latestRecord = records.length > 0 ? records[records.length - 1] : null;
   const label = latestRecord?.label || session?.label || 'No Data';
   const labelColor = labelColors[label] || '#6b7280';
   const hasData = !!latestRecord || records.length > 0;
+
+  // Loading state while checking devices
+  if (hasDevices === null) {
+    return (
+      <div className="p-4 lg:p-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center py-20">
+          <div className="text-slate-500">Đang tải...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // User has no devices - show prompt
+  if (!hasDevices) {
+    return (
+      <div className="p-4 lg:p-6 max-w-3xl mx-auto text-center py-20">
+        <Cpu size={48} className="mx-auto text-slate-300 mb-4" />
+        <h2 className="text-xl font-semibold text-slate-700 mb-2">
+          Bạn chưa đăng ký thiết bị
+        </h2>
+        <p className="text-slate-500 mb-6">
+          Vui lòng thêm thiết bị ESP32 để xem dữ liệu sức khỏe của bạn.
+        </p>
+        <button
+          onClick={() => navigate('/devices')}
+          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+        >
+          Thêm thiết bị
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto space-y-4">

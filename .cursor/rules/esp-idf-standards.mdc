@@ -1,0 +1,218 @@
+---
+description: Nguyên tắc nền tảng cho hệ thống nhúng ESP-IDF
+alwaysApply: true
+---
+
+# ESP-IDF Embedded Standards — BTL IoT Projects
+
+Dựa trên **EmbeddedEsp** (IoMT), các dự án nhúng ESP-IDF trong BTL phải tuân thủ các nguyên tắc sau.
+
+---
+
+## 1. Cấu trúc thư mục bắt buộc
+
+```
+project_name/
+├── CMakeLists.txt                      # Entry point: include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+├── sdkconfig                           # ESP-IDF configuration
+├── partitions.csv                      # Partition table (single app)
+├── main/
+│   ├── main.c                          # app_main() + display_task + monitor_task
+│   └── CMakeLists.txt                  # idf_component_register (LIỆT KÊ TẤT CẢ .c)
+└── components/
+    ├── <sensor_a>/                     # 1 component = 1 cảm biến/trường hợp
+    │   ├── <sensor_a>.c                # Business logic + FreeRTOS task
+    │   ├── <sensor_a>.h                # Public API
+    │   ├── include/
+    │   │   └── <sensor_a>_config.h     # Hardware config macros ONLY
+    │   └── CMakeLists.txt              # idf_component_register
+    ├── <data_module>/                  # Shared data structure
+    │   ├── <data_module>.c
+    │   ├── <data_module>.h
+    │   └── CMakeLists.txt
+    └── <manager_b>/                    # WiFi, MQTT, Display...
+        ├── <manager_b>.c
+        ├── <manager_b>.h
+        └── CMakeLists.txt
+```
+
+**Quy tắc tuyệt đối:**
+- Mỗi component có `CMakeLists.txt` riêng.
+- `main/CMakeLists.txt` **liệt kê tất cả** file `.c` một cách tường minh (không dùng `SRCS ${COMPONENT_DIR}/xxx/*.c`).
+- Mỗi component có **đúng 1 file config**: `<name>_config.h` chứa macro phần cứng.
+- File config nằm trong `include/`, khai báo `#pragma once`.
+
+---
+
+## 2. Build System — CMake
+
+### Top-level CMakeLists.txt
+
+```cmake
+cmake_minimum_required(VERSION 3.16)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(project_name)
+```
+
+### Component CMakeLists.txt
+
+```cmake
+idf_component_register(
+    SRCS
+        "<sensor>.c"
+        # Thêm辅助 .c ở đây nếu có (spo2_algorithm.c, thermal_processor.c...)
+    INCLUDE_DIRS "include"
+    REQUIRES "dep_component_a" "dep_component_b"
+)
+```
+
+**Quy tắc:**
+- `REQUIRES`: Liệt kê tất cả component mà component này phụ thuộc.
+- Không dùng `PRIV_INCLUDE_DIRS` trừ khi thực sự cần thiết.
+- Có thể thêm `EMBED_FILES` cho dữ liệu nhị phân (logo, font...).
+
+### sdkconfig — Quy tắc bắt buộc
+
+```bash
+CONFIG_IDF_TARGET_ESP32=y          # Hoặc esp32s3
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_OFFSET=0x8000
+CONFIG_COMPILER_OPTIMIZATION_DEFAULT=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_TASK_WDT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+```
+
+---
+
+## 3. Mẫu khởi tạo phần cứng — Phong cách EmbeddedEsp
+
+### GPIO Config (luôn dùng `gpio_config_t`)
+
+```c
+gpio_config_t io_conf = {
+    .pin_bit_mask = (1ULL << PIN_NAME),
+    .mode = GPIO_MODE_INPUT,          // Hoặc OUTPUT, INPUT_OUTPUT_OD...
+    .pull_up_en = GPIO_PULLUP_ENABLE, // Phù hợp với cảm biến
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE,   // Hoặc POSEDGE, NEGEDGE,_ANYEDGE
+};
+gpio_config(&io_conf);
+```
+
+### I2C Init (mỗi thiết bị trên bus riêng hoặc dùng mutex)
+
+```c
+i2c_config_t conf = {
+    .mode = I2C_MODE_MASTER,
+    .sda_io_num = XXX_SDA_PIN,
+    .scl_io_num = XXX_SCL_PIN,
+    .sda_pullup_en = GPIO_PULLUP_ENABLE,
+    .scl_pullup_en = GPIO_PULLUP_ENABLE,
+    .master.clk_speed = XXX_I2C_SPEED, // 400000 (400kHz) cho MAX30105
+};
+i2c_param_config(XXX_I2C_PORT, &conf);
+i2c_driver_install(XXX_I2C_PORT, conf.mode, 0, 0, 0);
+
+// Tạo mutex riêng cho từng bus
+xxx_mutex = xSemaphoreCreateMutex();
+```
+
+---
+
+## 4. Mẫu Task FreeRTOS
+
+Mọi task sensor đều tuân theo cấu trúc sau:
+
+```c
+void xxx_sensor_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Task started...");
+
+    // 1. Lấy shared data + event group
+    xxx_data_t *data = xxx_data_get();
+    EventGroupHandle_t evt = xxx_data_get_event_group();
+
+    // 2. Hardware init (GPIO, I2C, ISR...)
+    xxx_sensor_init();
+
+    // 3. Vòng lặp chính
+    while (1) {
+        // Luôn chờ WiFi trước khi đọc dữ liệu
+        xEventGroupWaitBits(evt, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+
+        // Đọc cảm biến, xử lý, cập nhật shared data
+        // ...
+
+        vTaskDelay(pdMS_TO_TICKS(INTERVAL_MS));
+    }
+}
+```
+
+**Quy tắc:**
+- Task có tham số `void *pvParameters` (luôn có, dù không dùng).
+- Dùng `ESP_LOGI/W/E` với `static const char *TAG = "XXX";` ở đầu file.
+- Không dùng `vTaskDelay(0)` — phải có delay dương.
+- Nếu task nên chạy ngay khi khởi động (không chờ WiFi): đặt `WIFI_CONNECTED_BIT` trong vòng lặp, không phải ngoài.
+
+---
+
+## 5. NVS — Lưu trữ bền vững
+
+### Lưu
+
+```c
+static void save_to_nvs(xxx_data_t *data) {
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "NVS open failed"); return; }
+    nvs_set_i32(nvs, "key", data->field);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+```
+
+### Đọc
+
+```c
+static void load_from_nvs(xxx_data_t *data) {
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &nvs);
+    if (err != ESP_OK) { ESP_LOGI(TAG, "No NVS data"); return; }
+    nvs_get_i32(nvs, "key", &data->field);
+    nvs_close(nvs);
+}
+```
+
+---
+
+## 6. EventGroup — Đồng bộ toàn hệ thống
+
+```c
+// Trong <data_module>.h
+#define WIFI_CONNECTED_BIT BIT0
+
+// Khởi tạo
+static EventGroupHandle_t s_evt_group = NULL;
+s_evt_group = xEventGroupCreate();
+
+// Bật bit khi WiFi kết nối thành công (wifi_manager)
+xEventGroupSetBits(evt, WIFI_CONNECTED_BIT);
+
+// Chờ bit trong task
+xEventGroupWaitBits(evt, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+```
+
+---
+
+## 7. Partition Table
+
+Luôn dùng `partitions.csv` trong thư mục gốc:
+
+```csv
+# Name,   Type, SubType, Offset,  Size, Flags
+app0,     app,  factory, 0x10000, 2M,
+nvs,      data, nvs,     0x9000,  0x6000,
+```
+
+Ghi chú: `CONFIG_PARTITION_TABLE_OFFSET=0x8000` trong sdkconfig.

@@ -63,5 +63,8 @@ public class SessionDto {
         public Double confidence;
         public Instant timestamp;
         public Instant ingestedAt;
+
+        /** Địa chỉ MAC của thiết bị ESP32 gửi dữ liệu (format: 3c:0f:02:cd:2c:88) */
+        public String macAddress;
     }
 }

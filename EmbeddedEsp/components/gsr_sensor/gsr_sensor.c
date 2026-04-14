@@ -41,7 +41,7 @@ static void load_calibration_from_nvs(health_data_t *data) {
     nvs_get_i32(nvs, "gsr_offset", &data->gsr_offset);
     nvs_get_i32(nvs, "gsr_baseline", &data->gsr_baseline);
     int32_t done = 0;
-    nvs_get_i32(nvs, "calibrate_done", &done);
+    nvs_get_i32(nvs, "calibrate_done",   &done);
     data->calibrate_done = (done == 1);
     nvs_close(nvs);
     ESP_LOGI(TAG, "Loaded from NVS: offset=%d, baseline=%d, done=%d",

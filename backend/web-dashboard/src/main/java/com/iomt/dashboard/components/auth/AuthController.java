@@ -6,6 +6,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -27,6 +28,7 @@ import java.util.Map;
 public class AuthController {
 
     private final MongoTemplate mongoTemplate;
+    private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
     // ================================================================
     // POST /api/auth/register
@@ -58,7 +60,7 @@ public class AuthController {
         // 3. Tao tai khoan moi
         AuthEntity newUser = new AuthEntity();
         newUser.email = dto.email;
-        newUser.password = dto.password; // plain text (chi de demo)
+        newUser.password = encoder.encode(dto.password);
         newUser.name = dto.name;
         newUser.createdAt = Instant.now();
 
@@ -98,8 +100,8 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
-        // 3. Kiem tra mat khau
-        if (!user.password.equals(dto.password)) {
+        // 3. Kiem tra mat khau bang BCrypt
+        if (!encoder.matches(dto.password, user.password)) {
             AuthDto error = new AuthDto();
             error.setMessage("Mat khau khong dung");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);

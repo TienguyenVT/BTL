@@ -20,6 +20,7 @@ static health_data_t s_health_data = {
     .temp_baseline = 0.0f,
     .calibrate_active = false,
     .calibrate_done = false,
+    .mac_address = "",
 };
 
 static EventGroupHandle_t s_wifi_event_group = NULL;

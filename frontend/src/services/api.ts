@@ -26,12 +26,12 @@ export const getLatestHealth = (userId) => api.get('/health/latest', authHeader(
 export const getHealthHistory = (userId, hours) => api.get('/health/history', { params: { hours }, ...authHeader(userId) });
 export const getRecentHealth = (userId, limit) => api.get('/health/recent', { params: { limit }, ...authHeader(userId) });
 
-// Sessions
-export const getLatestSession = () => api.get('/health/sessions/latest');
-export const getLiveSession = () => api.get('/health/sessions/live');
-export const getSessionById = (sessionId) => api.get(`/health/sessions/${sessionId}`);
-export const getSessionsHistory = (hours) => api.get('/health/sessions/history', { params: { hours } });
-export const getAllSessions = () => api.get('/health/sessions');
+// Sessions (Yeu cau X-User-Id header de loc theo device cua user)
+export const getLatestSession = (userId) => api.get('/health/sessions/latest', authHeader(userId));
+export const getLiveSession = (userId) => api.get('/health/sessions/live', authHeader(userId));
+export const getSessionById = (sessionId, userId) => api.get(`/health/sessions/${sessionId}`, authHeader(userId));
+export const getSessionsHistory = (hours, userId) => api.get('/health/sessions/history', { params: { hours }, ...authHeader(userId) });
+export const getAllSessions = (userId) => api.get('/health/sessions', authHeader(userId));
 
 // Environment (realtime 1s)
 export const getEnvironment = () => api.get('/health/environment');

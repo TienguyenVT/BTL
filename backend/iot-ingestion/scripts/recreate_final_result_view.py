@@ -34,15 +34,16 @@ pipeline = [
     {"$match": {
         "prediction.label": {"$exists": True, "$ne": None}
     }},
-    # Flatten sensor + features + prediction ra bac nhat
+    # Flatten sensor + features + prediction + device ra bac nhat
     {"$addFields": {
         # 6 sensor fields (4 cu + 2 DHT11 moi)
         "bpm":        "$sensor.bpm",
         "spo2":      "$sensor.spo2",
         "body_temp": "$sensor.body_temp",
         "gsr_adc":   "$sensor.gsr_adc",
-        "room_temp": "$sensor.room_temp",
-        "humidity":  "$sensor.humidity",
+        # 2 DHT11 fields (Node-RED v4 ghi sensor.dht11_room_temp, sensor.dht11_humidity)
+        "room_temp":   "$sensor.dht11_room_temp",
+        "humidity":    "$sensor.dht11_humidity",
         # 8 engineered features (6 cu + 2 DHT11)
         "bpm_spo2_ratio":             "$features.bpm_spo2_ratio",
         "temp_gsr_interaction":       "$features.temp_gsr_interaction",
@@ -58,6 +59,8 @@ pipeline = [
         # Prediction
         "label":      "$prediction.label",
         "confidence": "$prediction.confidence",
+        # Device identity
+        "mac_address": "$mac_address",
     }},
     # Project chi cac fields can thiet
     {"$project": {
@@ -65,6 +68,7 @@ pipeline = [
         # Thoi gian + thiet bi
         "timestamp":   1,
         "device_id":   1,
+        "mac_address": 1,
         "ingested_at": 1,
         "source":       1,
         "data_quality": 1,

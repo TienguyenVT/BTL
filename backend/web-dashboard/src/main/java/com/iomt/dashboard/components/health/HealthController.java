@@ -1,5 +1,7 @@
 package com.iomt.dashboard.components.health;
 
+import com.iomt.dashboard.common.UserUtils;
+import com.iomt.dashboard.components.device.DeviceEntity;
 import lombok.RequiredArgsConstructor;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -8,6 +10,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.FileWriter;
@@ -31,8 +35,7 @@ import java.util.*;
  *    GET /api/health/history  — Du lieu N gio gan day
  *    GET /api/health/recent   — N ban ghi gan nhat
  *
- * Chu y: He thong KHONG phan chia theo user/device.
- *        Lay HET data tu final_result de hien thi.
+ * Chu y: Cac endpoint loc data theo MAC cua user da dang ky trong bang devices.
  */
 @RestController
 @RequestMapping("/api/health")
@@ -43,6 +46,7 @@ public class HealthController {
     private static final String LOG_FILE = "C:\\Documents\\BTL\\debug-db097a.log";
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
     private static final DateTimeFormatter TS_PARSE_FMT = DateTimeFormatter.ofPattern("yyyy:MM:dd - HH:mm:ss");
+    private static final String DEVICES_COLL = "devices";
 
     private final MongoTemplate mongoTemplate;
 
@@ -64,134 +68,144 @@ public class HealthController {
         }
     }
 
+    /**
+     * Lay danh sach MAC cua cac thiet bi ma user da dang ky.
+     */
+    private List<String> getUserDeviceMacs(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return List.of();
+        }
+        Query query = new Query(Criteria.where("user_id").is(userId));
+        List<DeviceEntity> devices = mongoTemplate.find(query, DeviceEntity.class, DEVICES_COLL);
+        return devices.stream()
+                .map(d -> d.getMacAddress() != null ? d.getMacAddress().toLowerCase() : null)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
     // ================================================================
     // GET /api/health/latest
-    //    Lay chi so moi nhat (khong loc theo user/device).
+    //    Lay chi so moi nhat cua user (theo MAC da dang ky).
     //    Output: Map<String, Object> | null
     // ================================================================
     @GetMapping("/latest")
-    public Map<String, Object> getLatest(
+    public ResponseEntity<Map<String, Object>> getLatest(
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
-        writeLog("initial", "H1", "HealthController.getLatest:enter",
-                "getLatest called, no user/device filter",
-                Map.of("rawUserId", userId != null ? userId : "null"));
+        String uid = UserUtils.extractUserId(userId);
+        List<String> userMacs = getUserDeviceMacs(uid);
 
-        // H1 FIX: Query all data from final_result, no user/device filter
-        Query query = new Query()
-                .with(Sort.by(Sort.Direction.DESC, "ingested_at"))
-                .limit(1);
+        writeLog("mac-filter", "H1", "HealthController.getLatest:enter",
+                "getLatest with MAC filter",
+                Map.of("userId", uid, "userMacs", userMacs));
 
-        writeLog("initial", "H1", "HealthController.getLatest:beforeFindOne",
-                "querying final_result (all data, sorted by ingested_at DESC)",
-                Map.of("collection", "final_result", "sortField", "ingested_at"));
+        if (userMacs.isEmpty()) {
+            writeLog("mac-filter", "H1", "HealthController.getLatest:noDevices",
+                    "user has no registered devices",
+                    Map.of());
+            return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+        }
+
+        Query query = new Query(
+                Criteria.where("mac_address").in(userMacs)
+        ).with(Sort.by(Sort.Direction.DESC, "ingested_at")).limit(1);
+
+        writeLog("mac-filter", "H1", "HealthController.getLatest:beforeFindOne",
+                "querying final_result with MAC filter",
+                Map.of("macs", userMacs));
 
         Document doc = mongoTemplate.findOne(query, Document.class, "final_result");
 
-        writeLog("initial", "H1", "HealthController.getLatest:afterFindOne",
-                "findOne result",
-                Map.of("docFound", doc != null,
-                        "docKeys", doc != null ? new ArrayList<>(doc.keySet()) : Collections.emptyList(),
-                        "rawDoc", doc != null ? doc.entrySet().stream()
-                                .collect(java.util.stream.Collectors.toMap(
-                                        Map.Entry::getKey, e -> e.getValue() instanceof org.bson.types.ObjectId
-                                                ? e.getValue().toString() : e.getValue()))
-                                : Collections.emptyMap()));
-
         if (doc == null) {
-            writeLog("initial", "H1", "HealthController.getLatest:docNull",
-                    "final_result is empty",
+            writeLog("mac-filter", "H1", "HealthController.getLatest:docNull",
+                    "no data found for user's devices",
                     Map.of());
-            return null;
+            return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
         }
 
         Map<String, Object> result = flattenDocument(doc);
-
-        writeLog("initial", "H1", "HealthController.getLatest:result",
+        writeLog("mac-filter", "H1", "HealthController.getLatest:result",
                 "returning health data",
-                Map.of("resultFields", new ArrayList<>(result.keySet()), "result", result));
+                Map.of("macAddress", doc.getString("mac_address"), "bpm", result.get("bpm")));
 
-        return result;
+        return ResponseEntity.ok(result);
     }
 
     // ================================================================
     // GET /api/health/history
-    //    Lay du lieu trong khoang N gio.
-    //    Neu khong co data trong khoang N gio, tra ve TAT CA data (demo data).
+    //    Lay du lieu trong khoang N gio (theo MAC da dang ky).
     //    Output: List<Map<String, Object>> (tu cu den moi)
     // ================================================================
     @GetMapping("/history")
-    public List<Map<String, Object>> getHistory(
+    public ResponseEntity<List<Map<String, Object>>> getHistory(
             @RequestHeader(value = "X-User-Id", required = false) String userId,
             @RequestParam(defaultValue = "24") int hours) {
 
-        writeLog("initial", "H2", "HealthController.getHistory:enter",
-                "getHistory called, no user/device filter",
-                Map.of("hours", hours));
+        String uid = UserUtils.extractUserId(userId);
+        List<String> userMacs = getUserDeviceMacs(uid);
 
-        // H2 FIX: Use ingested_at (datetime) instead of timestamp (string)
-        // ingested_at is datetime.datetime in MongoDB, which compares correctly with Instant
+        writeLog("mac-filter", "H2", "HealthController.getHistory:enter",
+                "getHistory with MAC filter",
+                Map.of("userId", uid, "hours", hours, "userMacs", userMacs));
+
+        if (userMacs.isEmpty()) {
+            writeLog("mac-filter", "H2", "HealthController.getHistory:noDevices",
+                    "user has no registered devices",
+                    Map.of());
+            return ResponseEntity.ok(List.of());
+        }
+
         Instant timeAgo = Instant.now().minus(hours, ChronoUnit.HOURS);
 
-        writeLog("initial", "H2", "HealthController.getHistory:query",
-                "time range for query using ingested_at (datetime)",
-                Map.of("hours", hours, "timeAgo", timeAgo.toString(), "now", Instant.now().toString()));
-
-        // Query using ingested_at (datetime) >= Instant — this type-matches correctly
         Query query = new Query(
-                Criteria.where("ingested_at").gte(timeAgo)
+                Criteria.where("mac_address").in(userMacs)
+                        .and("ingested_at").gte(timeAgo)
         ).with(Sort.by(Sort.Direction.ASC, "ingested_at"));
 
         List<Document> docs = mongoTemplate.find(query, Document.class, "final_result");
 
-        writeLog("initial", "H2", "HealthController.getHistory:afterFind",
+        writeLog("mac-filter", "H2", "HealthController.getHistory:result",
                 "history query result",
-                Map.of("hours", hours, "docCount", docs.size()));
+                Map.of("docCount", docs.size()));
 
-        // Neu khong co data trong khoang N gio, lay TAT CA data (demo data)
-        if (docs.isEmpty()) {
-            writeLog("initial", "H2", "HealthController.getHistory:fallback",
-                    "no data in time range, falling back to all data",
-                    Map.of("hours", hours));
-
-            Query allQuery = new Query()
-                    .with(Sort.by(Sort.Direction.ASC, "ingested_at"));
-            docs = mongoTemplate.find(allQuery, Document.class, "final_result");
-
-            writeLog("initial", "H2", "HealthController.getHistory:fallbackResult",
-                    "all data fallback",
-                    Map.of("totalDocs", docs.size()));
-        }
-
-        return docs.stream().map(this::flattenDocument).toList();
+        return ResponseEntity.ok(docs.stream().map(this::flattenDocument).toList());
     }
 
     // ================================================================
     // GET /api/health/recent
-    //    Lay N ban ghi gan nhat (khong loc theo user/device).
+    //    Lay N ban ghi gan nhat (theo MAC da dang ky).
     //    Output: List<Map<String, Object>>
     // ================================================================
     @GetMapping("/recent")
-    public List<Map<String, Object>> getRecent(
+    public ResponseEntity<List<Map<String, Object>>> getRecent(
             @RequestHeader(value = "X-User-Id", required = false) String userId,
             @RequestParam(defaultValue = "20") int limit) {
 
-        writeLog("initial", "H1", "HealthController.getRecent:enter",
-                "getRecent called, no user/device filter",
-                Map.of("limit", limit));
+        String uid = UserUtils.extractUserId(userId);
+        List<String> userMacs = getUserDeviceMacs(uid);
 
-        // H1 FIX: Query all data from final_result, no device filter
-        Query query = new Query()
-                .with(Sort.by(Sort.Direction.DESC, "ingested_at"))
-                .limit(limit);
+        writeLog("mac-filter", "H1", "HealthController.getRecent:enter",
+                "getRecent with MAC filter",
+                Map.of("userId", uid, "limit", limit, "userMacs", userMacs));
+
+        if (userMacs.isEmpty()) {
+            writeLog("mac-filter", "H1", "HealthController.getRecent:noDevices",
+                    "user has no registered devices",
+                    Map.of());
+            return ResponseEntity.ok(List.of());
+        }
+
+        Query query = new Query(
+                Criteria.where("mac_address").in(userMacs)
+        ).with(Sort.by(Sort.Direction.DESC, "ingested_at")).limit(limit);
 
         List<Document> docs = mongoTemplate.find(query, Document.class, "final_result");
 
-        writeLog("initial", "H1", "HealthController.getRecent:afterFind",
+        writeLog("mac-filter", "H1", "HealthController.getRecent:result",
                 "recent query result",
-                Map.of("limit", limit, "docCount", docs.size()));
+                Map.of("docCount", docs.size()));
 
-        return docs.stream().map(this::flattenDocument).toList();
+        return ResponseEntity.ok(docs.stream().map(this::flattenDocument).toList());
     }
 
     // ================================================================
@@ -285,6 +299,7 @@ public class HealthController {
         // Metadata
         map.put("source", doc.getString("source"));
         map.put("dataQuality", doc.getString("data_quality"));
+        map.put("macAddress", doc.getString("mac_address"));
 
         // ingested_at: convert to ISO-8601 string for FE to parse
         Object ingestedAt = doc.get("ingested_at");

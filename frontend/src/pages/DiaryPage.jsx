@@ -89,8 +89,7 @@ export default function DiaryPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-16">
           <BookOpen size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-500 font-medium">No diary entries yet</p>
-          <p className="text-slate-400 text-sm mt-1">Click "New Entry" to start journaling your health.</p>
+          <p className="text-slate-500 font-medium">No diary entries yet</p>  
         </div>
       ) : (
         <div className="space-y-3">

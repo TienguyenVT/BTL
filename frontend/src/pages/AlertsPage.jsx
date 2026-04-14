@@ -64,7 +64,6 @@ export default function AlertsPage() {
         <div className="text-center py-16">
           <Bell size={40} className="mx-auto text-slate-300 mb-3" />
           <p className="text-slate-500 font-medium">No alerts</p>
-          <p className="text-slate-400 text-sm mt-1">You're all clear! No health alerts generated.</p>
         </div>
       ) : (
         <div className="space-y-3">

@@ -42,11 +42,7 @@ export default function BackendAuth({ onConnected }) {
           <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
             <Heart size={28} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-800">IoMT Health Monitor</h1>
-          <div className="flex items-center justify-center gap-1.5 mt-2 text-slate-500 text-sm">
-            <Server size={14} />
-            Connect to your health backend
-          </div>
+          <h1 className="text-2xl font-bold text-slate-800">IoMT Health</h1>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-8">

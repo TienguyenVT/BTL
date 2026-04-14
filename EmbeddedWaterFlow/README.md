@@ -1,60 +1,299 @@
-# Hệ thống đo lưu lượng nước YF-S201 trên ESP32
+# Hệ thống giám sát lưu lượng nước ESP32 — YF-S201 + PZEM-004T
 
 ## 1. Tổng quan
 
-Dự án này xây dựng một hệ thống nhúng trên ESP32 (ESP32-WROOM-32) để đọc và xử lý dữ liệu từ cảm biến lưu lượng nước **YF-S201**. Hệ thống được phát triển theo kiến trúc **component-based** (dựa trên EmbeddedEsp - một hệ thống nhúng IoMT chuẩn), sử dụng FreeRTOS để quản lý tác vụ và ESP-IDF làm framework.
+Dự án xây dựng một hệ thống nhúng trên **ESP32** đo lưu lượng nước và công suất điện, gửi dữ liệu lên **HiveMQ Cloud** qua MQTT. Hệ thống dùng FreeRTOS quản lý tác vụ, ESP-IDF làm framework, kiến trúc **component-based** với 6 component độc lập.
 
-### 1.1 Tính năng chính
+### Tính năng chính
 
-- Đo lưu lượng nước tức thời (L/phút)
+- Đo lưu lượng nước tức thời (L/phút) qua cảm biến **YF-S201** (ISR GPIO)
 - Đếm tổng thể tích nước đã chảy (Lít)
-- Phát hiện dòng chảy / không dòng chảy
-- Phát hiện rò rỉ (lưu lượng nhỏ nhưng liên tục)
-- Giao diện Serial để xem dữ liệu
-- Lưu trạng thái trên NVS (Non-Volatile Storage)
+- Đo điện áp, dòng điện, công suất, năng lượng qua **PZEM-004T** (UART Modbus)
+- Điều khiển relay bật/tắt từ xa qua MQTT
+- Phát hiện rò rỉ nước (lưu lượng nhỏ nhưng liên tục)
+- WiFi provisioning qua **SoftAP + Web Portal** (không cần cắm cáp)
+- Đồng bộ thời gian qua **SNTP** (timezone ICT-7)
+- Lưu trạng thái WiFi trên **NVS**
+- Giao diện Serial Monitor in dữ liệu real-time
 
-### 1.2 Kiến trúc hệ thống
+## 2. Kiến trúc hệ thống
 
 ```
 EmbeddedWaterFlow/
-├── CMakeLists.txt                    # Project entry (idf-build)
-├── sdkconfig                         # ESP-IDF configuration (ESP32 target)
-├── partitions.csv                    # Bảng phân vùng flash
+├── CMakeLists.txt
+├── sdkconfig
+├── partitions.csv
 ├── main/
-│   ├── main.c                        # app_main() + monitor_task
-│   └── CMakeLists.txt                # Component registration (explicit SRCS)
+│   ├── main.c             # app_main(), monitor_task
+│   ├── main.idf_component.yml
+│   └── CMakeLists.txt
 └── components/
-    ├── water_data/                   # Shared data structure + EventGroup
+    ├── water_data/          # Singleton struct + EventGroup
     │   ├── water_data.c
-    │   ├── water_data.h
+    │   ├── include/water_data.h
     │   └── CMakeLists.txt
-    └── water_flow_sensor/            # YF-S201 driver + FreeRTOS task
-        ├── water_flow_sensor.c       # ISR + flow calculation
-        ├── water_flow_sensor.h
-        ├── include/
-        │   ├── yfs201_config.h       # Hardware & algorithm config
-        │   └── water_flow_sensor.h
+    ├── water_flow_sensor/   # YF-S201 driver + ISR + FreeRTOS task
+    │   ├── water_flow_sensor.c
+    │   ├── include/water_flow_sensor.h
+    │   ├── include/yfs201_config.h    # Hardware pins, thresholds
+    │   └── CMakeLists.txt
+    ├── pzem004t/            # PZEM-004T UART Modbus + FreeRTOS task
+    │   ├── pzem004t.c
+    │   ├── include/pzem004t.h
+    │   ├── include/pzem004t_config.h  # UART pins, baud, interval
+    │   └── CMakeLists.txt
+    ├── wifi_manager/        # SoftAP + STA + HTTP server + NTP
+    │   ├── wifi_manager.c
+    │   ├── include/wifi_manager.h
+    │   └── CMakeLists.txt
+    ├── mqtt_manager/        # HiveMQ Cloud MQTT client + relay control
+    │   ├── mqtt_manager.c
+    │   ├── include/mqtt_manager.h
+    │   ├── include/mqtt_config.h      # Broker URI, topics, credentials
+    │   └── CMakeLists.txt
+    └── relay_control/       # GPIO relay driver
+        ├── relay_control.c
+        ├── include/relay_control.h
         └── CMakeLists.txt
 ```
 
-## 2. Cài đặt và biên dịch
+### Luồng dữ liệu
 
-### 2.1 Yêu cầu
+```
+YF-S201 (GPIO ISR)
+       │
+       ▼
+water_flow_sensor_task ──► water_sensor_data_t ◄── pzem004t_task
+       │                          │
+       │                          │
+       └──────────────────────────┴──► monitor_task
+                                          │
+                                          ├──► Serial (printf)
+                                          └──► mqtt_manager ──► HiveMQ Cloud
+```
 
-- **ESP-IDF** (phiên bản 4.4.x hoặc 5.x) đã được cài đặt và thiết lập biến môi trường.
-- **Python** 3.8 trở lên.
-- **ESP32 DevKit** (ESP32-WROOM-32 hoặc tương đương).
-- Cáp USB để flash firmware.
+## 3. FreeRTOS Task Architecture
 
-### 2.2 Các bước cài đặt
+| Task | Priority | Stack | Chức năng | Đợi WiFi |
+|------|----------|-------|-----------|----------|
+| `water_flow_task` | 5 | 4096 | Đọc YF-S201, tính lưu lượng | Có |
+| `pzem004t_task` | 5 | 4096 | Đọc PZEM-004T UART | Có |
+| `mqtt_task` (internal) | 5 | 8192 | MQTT event loop (esp_mqtt) | Có |
+| `monitor_task` | 3 | 4096 | Serial print, MQTT publish | Có |
+
+- 3 task sensor ngang hàng priority 5 — scheduler chia CPU time-slice công bằng
+- `monitor_task` priority 3 thấp hơn — chỉ chạy khi 3 task kia rảnh
+
+### EventGroup đồng bộ
+
+`WIFI_CONNECTED_BIT` (bit 0) được set khi ESP32 nhận IP từ AP. Mọi task sensor đều chờ bit này trước khi bắt đầu đọc cảm biến:
+
+```c
+xEventGroupWaitBits(evt, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
+```
+
+## 4. Cấu hình phần cứng
+
+### 4.1 YF-S201 — Cảm biến lưu lượng nước
+
+File: `components/water_flow_sensor/include/yfs201_config.h`
+
+| Macro | Giá trị | Ý nghĩa |
+|-------|---------|----------|
+| `YFS201_SIGNAL_PIN` | GPIO_NUM_4 | Chân GPIO nhận xung |
+| `YFS201_PULSES_PER_LITER` | 450.0f | Số xung / lít nước |
+| `FLOW_CALC_PERIOD_MS` | 1000 | Chu kỳ tính lưu lượng |
+| `FLOW_DETECT_THRESHOLD` | 0.1 L/min | Ngưỡng phát hiện dòng chảy |
+| `FLOW_LEAK_THRESHOLD` | 2.0 L/min | Ngưỡng rò rỉ |
+| `FLOW_CONFIRM_CYCLES` | 3 | Chu kỳ xác nhận dòng chảy |
+| `FLOW_IDLE_CYCLES` | 5 | Chu kỳ không dòng → IDLE |
+
+### 4.2 PZEM-004T — Đo điện năng
+
+File: `components/pzem004t/include/pzem004t_config.h`
+
+| Macro | Giá trị | Ý nghĩa |
+|-------|---------|----------|
+| `PZEM_UART_NUM` | UART_NUM_1 | UART1 |
+| `PZEM_TX_PIN` | GPIO_NUM_25 | TX |
+| `PZEM_RX_PIN` | GPIO_NUM_26 | RX |
+| `PZEM_BAUD_RATE` | 9600 | Baud rate |
+| `PZEM_DEFAULT_ADDR` | 0xF8 | Modbus address |
+| `PZEM_READ_INTERVAL_MS` | 1000 | Chu kỳ đọc |
+| `PZEM_MAX_RETRIES` | 3 | Số lần thử lại |
+| `PZEM_UART_TIMEOUT_MS` | 500 | Timeout UART |
+
+### 4.3 Relay
+
+File: `components/relay_control/include/relay_control.h`
+
+| Macro | Giá trị | Ý nghĩa |
+|-------|---------|----------|
+| `RELAY_GPIO_PIN` | 27 | GPIO điều khiển relay |
+
+Relay hoạt động ở chế độ **active-low** (GPIO=0 → relay ON, GPIO=1 → relay OFF).
+
+### 4.4 MQTT
+
+File: `components/mqtt_manager/include/mqtt_config.h`
+
+| Macro | Giá trị |
+|-------|---------|
+| `MQTT_BROKER_URI` | `mqtts://...s1.eu.hivemq.cloud:8883` |
+| `MQTT_USERNAME` | `Cntt1234` |
+| `MQTT_PASSWORD` | `Cntt1234` |
+| `MQTT_PUB_TOPIC` | `waterflow/sensors/data` |
+| `MQTT_RELAY_SUB_TOPIC` | `waterflow/relay/control` |
+| `MQTT_RELAY_PUB_TOPIC` | `waterflow/relay/status` |
+
+### 4.5 WiFi Provisioning
+
+File: `components/wifi_manager/include/wifi_manager.h`
+
+| Macro | Giá trị |
+|-------|---------|
+| `WATER_WIFI_AP_SSID` | `WaterFlow-Setup` |
+| `WATER_WIFI_AP_PASSWORD` | (Open — không có mật khẩu) |
+| `HTTP_PORT` | 80 |
+
+## 5. MQTT Protocol
+
+### 5.1 Sensor Data (publish — 1 giây)
+
+Topic: `waterflow/sensors/data`
+
+```json
+{
+  "timestamp": "2026-04-13T10:30:00Z",
+  "mac_address": "AA:BB:CC:DD:EE:FF",
+  "voltage": 220.5,
+  "current": 1.234,
+  "power": 271.8,
+  "energy": 1.2345,
+  "flow_rate": 2.50,
+  "total_volume": 15.678,
+  "pulse_count": 7055,
+  "mode": "ACTIVE"
+}
+```
+
+### 5.2 Relay Control (subscribe)
+
+Topic: `waterflow/relay/control`
+
+| Lệnh | Hành động |
+|------|-----------|
+| `{"relay":"ON"}` hoặc `"on"` | Bật relay |
+| `{"relay":"OFF"}` hoặc `"off"` | Tắt relay |
+| `{"relay":"TOGGLE"}` hoặc `"toggle"` | Đảo trạng thái relay |
+
+### 5.3 Relay Status (publish)
+
+Topic: `waterflow/relay/status`
+
+```json
+{"relay":"ON","mac_address":"AA:BB:CC:DD:EE:FF"}
+```
+
+## 6. Chế độ hoạt động
+
+| Mode | Giá trị | Ý nghĩa |
+|------|---------|----------|
+| `FLOW_MODE_CONFIG` | 0 | Chưa cấu hình WiFi — SoftAP đang chạy |
+| `FLOW_MODE_IDLE` | 1 | Không có nước chảy |
+| `FLOW_MODE_ACTIVE` | 2 | Phát hiện dòng chảy bình thường (≥ 2 L/min) |
+| `FLOW_MODE_LEAK` | 3 | Phát hiện rò rỉ (< 2 L/min nhưng liên tục) |
+
+### Sơ đồ chuyển trạng thái
+
+```
+                    ┌──────────────┐
+         ┌─────────→│   IDLE       │←──────────────┐
+         │          │(khong co nuoc)│               │
+         │          └──────┬───────┘               │
+         │                 │ idle_cycles > 5        │
+         │          ┌──────▼───────┐               │
+         │  confirm 3 chu ky       │               │
+         │ ┌─────────│   ACTIVE    │──────────────┤
+         │ │         └─────────────┘              │
+         │ │ (Q >= 2.0 L/min)                    │
+         │ │                                      │
+         │ │         ┌──────────────┐             │
+         │ └────────→│    LEAK      │←────────────┘
+         │  (Q < 2.0  │              │    (Q < 2.0 L/min
+         │   L/min)   └──────────────┘     lien tuc)
+```
+
+## 7. Nguyên lý đo lưu lượng
+
+Cảm biến YF-S201 sử dụng **bánh xe turbine** bên trong. Mỗi vòng quay tạo 1 xung vuông, tần số tỷ lệ tuyến tính với lưu lượng:
+
+```
+F(Hz) = 7.5 × Q(L/min)
+Xung/Lít = 450
+```
+
+Công thức tính trong code:
+
+```
+Q(L/min) = (pulses × 60000) / (450 × period_ms)
+```
+
+- `60000`: đổi từ phút sang mili-giây
+- `period_ms`: khoảng thời gian đo (mặc định 1000ms)
+
+### Interrupt Service Routine
+
+```
+GPIO 4 (cạnh lên) ──→ flow_pulse_isr() [IRAM, ISR-safe]
+
+portENTER_CRITICAL_ISR(&s_pulse_mutex)
+  s_pulse_count_isr++
+portEXIT_CRITICAL_ISR(&s_pulse_mutex)
+
+portENTER_CRITICAL_ISR(&s_event_mutex)
+  s_new_pulse_event = true
+portEXIT_CRITICAL_ISR(&s_event_mutex)
+```
+
+## 8. WiFi Provisioning Flow
+
+```
+Khởi động
+    │
+    ├── Có WiFi trong NVS? ──→ Kết nối STA ──→ Nhận IP ──→ Bật MQTT
+    │
+    └── Chưa có? ──→ Phát SoftAP 'WaterFlow-Setup'
+                       │
+                       └──→ HTTP Server (port 80)
+                                │
+                                └──→ User nhập SSID/password trên Web Portal
+                                         │
+                                         └──→ Lưu NVS ──→ Restart ──→ Kết nối STA
+```
+
+- Truy cập `http://192.168.4.1` để cấu hình WiFi
+- SSID WiFi: `WaterFlow-Setup` (open network)
+- Sau khi nhấn "Kết Noi", ESP32 tự restart và kết nối
+
+## 9. Cài đặt và biên dịch
+
+### Yêu cầu
+
+- **ESP-IDF** 4.4.x hoặc 5.x, đã thiết lập biến môi trường (`idf.py` có sẵn trong PATH)
+- **Python** 3.8+
+- **ESP32 DevKit** (bất kỳ module ESP32 nào)
+- Cáp USB để flash firmware
+
+### Các bước
 
 **Bước 1:** Di chuyển vào thư mục dự án
 
 ```bash
-cd C:/Documents/BTL/EmbeddedWaterFlow
+cd d:/Documents/BTL/EmbeddedWaterFlow
 ```
 
-**Bước 2:** Thiết lập mục tiêu ESP32
+**Bước 2:** Thiết lập target ESP32
 
 ```bash
 idf.py set-target esp32
@@ -66,182 +305,132 @@ idf.py set-target esp32
 idf.py menuconfig
 ```
 
-Kiểm tra các thông số:
-- Serial flasher config → Default serial port → COMx (chọn cổng ESP32)
-- Component config → FreeRTOS → Kernel → configTICK_RATE_HZ → 1000
+Kiểm tra:
+- `Serial flasher config → Default serial port → COMx` (chọn cổng ESP32)
+- `Component config → FreeRTOS → Kernel → configTICK_RATE_HZ → 1000`
 
-**Bước 4:** Biên dịch project
+**Bước 4:** Biên dịch
 
 ```bash
 idf.py build
 ```
 
-**Bước 5:** Flash firmware vào ESP32
+**Bước 5:** Flash và monitor
 
 ```bash
 idf.py -p COM3 flash monitor
 ```
 
-Thay `COM3` bằng cổng COM tương ứng của ESP32.
+Thay `COM3` bằng cổng COM tương ứng.
 
-**Bước 6:** Mở Serial Monitor
-
-```bash
-idf.py monitor
-```
-
-Hoặc kết hợp (đã làm ở bước 5).
-
-## 3. Nguyên lý hoạt động
-
-### 3.1 Nguyên lý đo lưu lượng
-
-Cảm biến YF-S201 sử dụng **bánh xe turbine (turbine wheel)** bên trong. Khi nước chảy qua:
-
-1. Bánh xe turbine quay với tốc độ tỷ lệ với lưu lượng.
-2. Mỗi vòng quay tạo ra **1 xung vuông (square wave)**.
-3. Tần số xung tỷ lệ tuyến tính với lưu lượng:
-
-```
-F(Hz) = 7.5 × Q(L/min)
-```
-
-4. Mỗi **lít nước** tương ứng với **450 xung**.
-
-```
-Xung/Lít = 450
-```
-
-### 3.2 Tính lưu lượng trong code
-
-```
-Q(L/min) = (số_xung × 60000) / (PULSES_PER_LITER × chu_kỳ_ms)
-         = xung × 133.33... / chu_kỳ_ms
-```
-
-- `60000`: đổi từ phút sang mili-giây
-- `450`: số xung trên mỗi lít nước
-- `chu_kỳ_ms`: khoảng thời gian đo (1 giây = 1000ms)
-
-### 3.3 Interrupt Service Routine (ISR)
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  GPIO 4 (cạnh lên) ──→ ISR: flow_pulse_isr()          │
-│                                                         │
-│  ISR thực hiện:                                         │
-│    1. Tăng biến đếm xung (s_pulse_count_isr++)          │
-│    2. Đặt cờ s_new_pulse_event = true                  │
-│                                                         │
-│  Cờ có thể được reset bởi task chính sau khi đọc      │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 3.4 Sơ đồ trạng thái
-
-```
-                    ┌──────────────┐
-         ┌─────────→│   IDLE       │←─────────────┐
-         │          │(khong co nuoc)│              │
-         │          └──────┬───────┘              │
-         │                 │ so chu ky > 5        │
-         │          ┌──────▼───────┐              │
-         │   confirm 3 chu ky    │              │
-         │ ┌─────────│   ACTIVE    │────────────┤
-         │ │         └─────────────┘              │
-         │ │ (luu luong >= 0.1 L/min)             │
-         │ │                                      │
-         │ │         ┌──────────────┐             │
-         │ └────────→│    LEAK      │←────────────┘
-         │  (Q < 2.0  │  (ro ri nuoc)│   (Q < 2.0 L/min
-         │   L/min)   └──────────────┘    lien tuc)
-         │                 │
-         └─────────────────┘
-```
-
-## 4. Cấu hình thông số
-
-Tất cả thông số hardware và thuật toán được định nghĩa trong file:
-
-```
-components/water_flow_sensor/include/yfs201_config.h
-```
-
-### Các thông số có thể tùy chỉnh
-
-| Thông số | Giá trị mặc định | Ý nghĩa |
-|----------|-------------------|---------|
-| `YFS201_SIGNAL_PIN` | GPIO_NUM_4 | Chân GPIO nhận xung |
-| `YFS201_PULSES_PER_LITER` | 450.0f | Số xung / lít nước |
-| `FLOW_CALC_PERIOD_MS` | 1000 | Chu kỳ tính lưu lượng (ms) |
-| `FLOW_DETECT_THRESHOLD` | 0.1 | Ngưỡng phát hiện dòng chảy (L/min) |
-| `FLOW_LEAK_THRESHOLD` | 2.0 | Ngưỡng rò rỉ (L/min) |
-| `FLOW_CONFIRM_CYCLES` | 3 | Số chu kỳ xác nhận dòng chảy |
-| `FLOW_IDLE_CYCLES` | 5 | Số chu kỳ không dòng → IDLE |
-
-## 5. Kết quả mong đợi
+## 10. Kết quả mong đợi
 
 ### Serial Output (115200 baud)
 
 ```
-I (456) MAIN: ==============================
-I (457) MAIN:   Water Flow Sensor - YF-S201
-I (458) MAIN:   ESP32 Target Build
-I (459) MAIN: ==============================
-I (461) MAIN: System started. Cho dong nuoc...
-I (467) YFS201: Khoi tao YF-S201 tren GPIO 4...
-I (468) YFS201: YF-S201 ready. VCC=5V, Signal=GPIO4, GND=GND
-I (469) YFS201: Thong so: 450 xung/L, chu ky tinh=1.0s, nguong=0.10 L/min
-I (472) YFS201: Water Flow Sensor Task Started...
-I (525) YFS201: Flow: 0.00 L/min | Total: 0.000 L | Pulses: 0 | Mode: 0
+I (456) MAIN: ==========================================
+I (457) MAIN:   Water Flow Sensor - YF-S201 + PZEM-004T
+I (458) MAIN:   ESP32 WiFi Config via Web Portal
+I (459) MAIN:   MQTT: HiveMQ Cloud
+I (460) MAIN: ==========================================
+I (461) MAIN: Khoi dong WiFi Provisioning...
+I (468) WIFI_AP: SoftAP 'WaterFlow-Setup' dang phat song WiFi!
+I (469) WIFI_AP: Vao 192.168.4.1 de cau hinh WiFi
+
+[Sau khi ket noi WiFi thanh cong...]
+I (520) WIFI_AP: Da ket noi WiFi - IP: 192.168.1.100
+I (521) WIFI_AP: => Da co ket noi WiFi. Cac sensor bat dau hoat dong!
+I (522) MQTT: MQTT client da khoi dong
+I (530) YFS201: Water Flow Sensor Task Started...
+I (535) PZEM004T: PZEM-004T Task Started...
+
+========== Water Flow Monitor ==========
+  Mode:    IDLE
+  MAC:     AA:BB:CC:DD:EE:FF
+  --- YF-S201 ---
+  Flow:    0.00 L/min
+  Total:   0.000 L
+  Pulses:  0
+  --- PZEM-004T ---
+  Voltage: 220.5 V
+  Current: 0.000 A
+  Power:   0.0 W
+  Energy:  0.0000 kWh
+  --- Relay ---
+  State:   OFF
+==========================================
+
 [Bat dau co nuoc chay...]
-I (1525) YFS201: Flow: 1.53 L/min | Total: 0.025 L | Pulses: 7 | Mode: 1
-I (2525) YFS201: Flow: 2.10 L/min | Total: 0.060 L | Pulses: 9 | Mode: 1
+I (1530) YFS201: Flow: 1.53 L/min | Total: 0.025 L | Pulses: 7 | Mode: 1
+I (2530) YFS201: Flow: 2.50 L/min | Total: 0.065 L | Pulses: 11 | Mode: 2
+
+I (2530) MQTT: Nhan du lieu MQTT: topic='waterflow/relay/control'
+I (2531) MQTT: Relay command: {"relay":"ON"}
+I (2531) RELAY: Relay ON
+I (2532) MQTT: Pub relay status: {"relay":"ON","mac_address":"AA:BB:CC:DD:EE:FF"}
+
+[Phat hien ro ri...]
+I (8530) YFS201: PHAT HIEN RO RI! Luu luong: 0.50 L/min
 ```
 
-### Các chế độ hoạt động
+## 11. Sơ đồ đấu dây
 
-| Mode | Giá trị | Ý nghĩa |
-|------|---------|----------|
-| `IDLE` | 0 | Không có nước chảy |
-| `ACTIVE` | 1 | Phát hiện dòng chảy bình thường |
-| `LEAK` | 2 | Phát hiện rò rỉ |
-
-## 6. Sơ đồ đấu dây chi tiết
-
-Xem file: `docs/wiring.md`
+### YF-S201
 
 ```
-  ESP32                    YF-S201
-  ───────────              ───────────────
-  5V / Vin    ────────────  Dây Đỏ (VCC)
-  GND         ────────────  Dây Đen (GND)
-  GPIO 4      ────────────  Dây Vàng (Signal)
+  ESP32                     YF-S201
+  ───────────               ───────────────
+  5V / Vin     ────────────  Dây Đỏ (VCC)
+  GND          ────────────  Dây Đen (GND)
+  GPIO 4       ────────────  Dây Vàng (Signal)
 ```
 
-## 7. So sánh với EmbeddedEsp
+### PZEM-004T (kết nối qua MAX-485 hoặc module TTL)
 
-| Khía cạnh | EmbeddedEsp (IoMT) | EmbeddedWaterFlow (YF-S201) |
-|-----------|---------------------|------------------------------|
-| Chip | ESP32-S3 | ESP32 (WROOM-32) |
-| Cảm biến | MAX30105, GSR, DS18B20, DHT11 | YF-S201 |
-| Giao diện | I2C, ADC, OneWire, Interrupt | Interrupt (GPIO) |
-| Task count | 6 tasks | 2 tasks |
-| Cấu trúc dữ liệu | `health_data_t` (phức tạp) | `water_sensor_data_t` (đơn giản) |
-| Component count | 10 components | 2 components |
-| WiFi/MQTT | Có | Chưa tích hợp |
-| Display | OLED SSD1306 | Không |
+```
+  ESP32                     PZEM-004T
+  ───────────               ───────────────
+  GPIO 25 (TX)  ────────────  RX (TTL module)
+  GPIO 26 (RX)  ────────────  TX (TTL module)
+  GND           ────────────  GND
+  5V            ────────────  VCC (5V)
+```
 
-## 8. Hạn chế và hướng phát triển
+### Relay Module
 
-### Hạn chế hiện tại
-- Chưa tích hợp WiFi/MQTT để gửi dữ liệu lên cloud.
-- Chưa có giao diện hiển thị (OLED).
-- Chưa có cơ chế hiệu chuẩn (calibration) cho cảm biến.
+```
+  ESP32                     Relay Module (5V)
+  ───────────               ───────────────
+  GPIO 27      ────────────  IN (Signal)
+  GND           ────────────  GND
+  5V            ────────────  VCC
+```
 
-### Hướng phát triển tiếp theo
-1. Tích hợp WiFi + MQTT (tham khảo `wifi_manager` và `mqtt_manager` từ EmbeddedEsp).
-2. Thêm OLED SSD1306 để hiển thị lưu lượng real-time.
-3. Tích hợp cảm biến DHT11 để đo nhiệt độ và độ ẩm môi trường.
-4. Thêm chức năng cảnh báo rò rỉ qua còi buzzer hoặc LED.
-5. Tích hợp Deep Sleep để tiết kiệm năng lượng.
+> **Lưu ý:** Relay trong hệ thống hoạt động ở chế độ **active-low** — relay ON khi GPIO=0, OFF khi GPIO=1.
+
+## 12. Các lệnh MQTT thường dùng (HiveMQ Cloud)
+
+### Bật relay
+
+```bash
+mosquitto_pub -h eaa56c03c1bd4c0194b2fb3dd11cfe4a.s1.eu.hivemq.cloud \
+  -p 8883 --capath /etc/ssl/certs/ -u Cntt1234 -P Cntt1234 \
+  -t waterflow/relay/control -m '{"relay":"ON"}'
+```
+
+### Tắt relay
+
+```bash
+mosquitto_pub -h eaa56c03c1bd4c0194b2fb3dd11cfe4a.s1.eu.hivemq.cloud \
+  -p 8883 --capath /etc/ssl/certs/ -u Cntt1234 -P Cntt1234 \
+  -t waterflow/relay/control -m '{"relay":"OFF"}'
+```
+
+### Đảo relay
+
+```bash
+mosquitto_pub -h eaa56c03c1bd4c0194b2fb3dd11cfe4a.s1.eu.hivemq.cloud \
+  -p 8883 --capath /etc/ssl/certs/ -u Cntt1234 -P Cntt1234 \
+  -t waterflow/relay/control -m '{"relay":"TOGGLE"}'
+```
+

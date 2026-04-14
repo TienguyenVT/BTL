@@ -2,6 +2,7 @@ package com.iomt.dashboard.components.device;
 
 import com.iomt.dashboard.common.UserUtils;
 import lombok.RequiredArgsConstructor;
+import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -50,24 +51,38 @@ public class DeviceController {
             return ResponseEntity.badRequest().body(dto);
         }
 
-        // 2. Kiem tra MAC da ton tai chua
-        Query checkMac = new Query(Criteria.where("mac_address").is(dto.macAddress));
+        // 2. Normalize MAC address
+        String normalizedMac = normalizeMac(dto.macAddress);
+
+        // 3. Kiem tra MAC da ton tai chua
+        Query checkMac = new Query(Criteria.where("mac_address").is(normalizedMac));
         DeviceEntity existing = mongoTemplate.findOne(checkMac, DeviceEntity.class);
         if (existing != null) {
             dto.message = "MAC Address da ton tai";
             return ResponseEntity.status(HttpStatus.CONFLICT).body(dto);
         }
 
-        // 3. Tao thiet bi moi
+        // 4. Kiem tra MAC co trong datalake_raw khong (verify device has data)
+        Query checkDatalake = new Query(
+                Criteria.where("mac_address").regex(normalizedMac, "i")
+        ).limit(1);
+        Document existingData = mongoTemplate.findOne(checkDatalake, Document.class, "datalake_raw");
+
+        if (existingData == null) {
+            dto.message = "MAC Address khong ton tai trong he thong";
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(dto);
+        }
+
+        // 5. Tao thiet bi moi
         DeviceEntity device = new DeviceEntity();
         device.userId = uid;
-        device.macAddress = dto.macAddress;
+        device.macAddress = normalizedMac;
         device.name = dto.name;
         device.createdAt = Instant.now();
 
         DeviceEntity saved = mongoTemplate.save(device);
 
-        // 4. Tra ve ket qua
+        // 6. Tra ve ket qua
         DeviceDto response = new DeviceDto();
         response.id = saved.id;
         response.macAddress = saved.macAddress;
@@ -75,6 +90,11 @@ public class DeviceController {
         response.createdAt = saved.createdAt;
         response.message = "Them thiet bi thanh cong";
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    private String normalizeMac(String mac) {
+        if (mac == null) return null;
+        return mac.trim().toLowerCase();
     }
 
     // ================================================================

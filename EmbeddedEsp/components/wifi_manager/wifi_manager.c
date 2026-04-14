@@ -8,10 +8,18 @@
 #include "esp_mac.h"
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_softap.h"
+#include <string.h>
 
 static const char *TAG = "WIFI_AP";
 
 static bool s_is_provisioned = false;
+
+static char s_mac_str[18] = {0};
+
+static void format_mac(uint8_t *mac, char *out) {
+    snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
 
 static void wifi_prov_event_handler(void *arg, esp_event_base_t event_base,
                                     int32_t event_id, void *event_data) {
@@ -43,6 +51,12 @@ static void wifi_prov_event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Da ket noi Router Internet thanh cong - IP: " IPSTR, IP2STR(&event->ip_info.ip));
+
+        uint8_t mac[6];
+        ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_MODE_STA, mac));
+        format_mac(mac, s_mac_str);
+        memcpy(health_data_get()->mac_address, s_mac_str, sizeof(s_mac_str));
+        ESP_LOGI(TAG, "MAC address: %s", s_mac_str);
 
         // MỞ KHÓA HOẠT ĐỘNG KHI ĐÃ LÊN MẠNG
         xEventGroupSetBits(health_data_get_event_group(), WIFI_CONNECTED_BIT);

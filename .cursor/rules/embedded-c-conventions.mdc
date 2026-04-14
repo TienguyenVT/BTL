@@ -1,0 +1,256 @@
+---
+description: Quy ước viết code C cho hệ thống nhúng ESP-IDF
+alwaysApply: true
+---
+
+# Embedded C Coding Conventions — BTL Projects
+
+Trích xuất từ **EmbeddedEsp**: quy ước viết code C bắt buộc cho mọi dự án nhúng trong BTL.
+
+---
+
+## 1. Quy tắc đặt tên
+
+| Loại | Quy ước | Ví dụ |
+|------|---------|-------|
+| Thư mục component | `snake_case` | `gsr_sensor`, `water_flow_sensor` |
+| File nguồn | `snake_case.c` | `max30105.c`, `thermal_processor.c` |
+| Header file | `snake_case.h` | `max30105.h` |
+| Config header | `snake_case_config.h` | `dht11_config.h` |
+| Struct/Type | `snake_case_t` (suffix `_t`) | `health_data_t`, `dht11_reading_t` |
+| Enum values | `SCREAMING_SNAKE` hoặc `snake_case` | `MODE_IDLE`, `FLOW_MODE_ACTIVE` |
+| Macro/Define | `SCREAMING_SNAKE` | `WIFI_CONNECTED_BIT`, `ADC_CHANNEL_3` |
+| Biến toàn cục | `s_<name>` (prefix `s_`) | `s_wifi_event_group`, `s_pulse_count` |
+| Biến tĩnh trong file | `s_<name>` | `s_consecutive_fails`, `s_calibrated` |
+| Biến cục bộ | `camelCase` | `lastReadTime`, `pulseCount` |
+| Hàm public | `snake_case` | `gsr_sensor_task()`, `dht11_sensor_read()` |
+| Hàm private (static) | `snake_case_` (underscore suffix) | `save_calibration_to_nvs_()` |
+| TAG log | `"XXX"` (viết hoa 3-6 ký tự) | `static const char *TAG = "GSR";` |
+
+---
+
+## 2. Guard cho header file
+
+Luôn dùng `#pragma once` (đơn giản, tránh `#ifndef` trùng lặp):
+
+```c
+#pragma once
+
+#include <stdint.h>
+#include "freertos/FreeRTOS.h"
+// ...
+```
+
+---
+
+## 3. Macro cấu hình — Đặt trong `*_config.h`
+
+### Phong cách EmbeddedEsp
+
+```c
+#pragma once
+#include "driver/gpio.h"
+
+// Hardware pins
+#define SENSOR_PIN             GPIO_NUM_4
+#define SENSOR_ADC_UNIT        ADC_UNIT_1
+#define SENSOR_ADC_CHANNEL     ADC_CHANNEL_3
+
+// Algorithm params
+#define SENSOR_SAMPLE_SIZE     20
+#define SENSOR_THRESHOLD       100
+#define SENSOR_INTERVAL_MS     100
+```
+
+**Quy tắc:**
+- Tất cả `#define` phần cứng/algorithm trong file config.
+- File `.c` chỉ `#include "sensor_config.h"`, KHÔNG hardcode số.
+- File config nằm trong `include/` của component.
+
+---
+
+## 4. Biến volatile cho ISR
+
+```c
+// Biến chia sẻ giữa ISR và Task — BẮT BUỘC volatile + mutex
+static volatile uint32_t s_pulse_count = 0;
+static portMUX_TYPE s_pulse_mutex = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool s_new_event = false;
+static portMUX_TYPE s_event_mutex = portMUX_INITIALIZER_UNLOCKED;
+```
+
+**Quy tắc:**
+- Biến nào bị ISR sửa → phải `volatile`.
+- Truy cập trong ISR → `portENTER_CRITICAL_ISR`.
+- Truy cập trong Task → `portENTER_CRITICAL` / đọc trực tiếp (phụ thuộc context).
+
+---
+
+## 5. Singleton cho Shared Data
+
+```c
+// Trong xxx_data.c
+static xxx_data_t s_data = {
+    .field_a = 0,
+    .field_b = 0.0f,
+};
+
+xxx_data_t *xxx_data_get(void) {
+    return &s_data;
+}
+```
+
+```c
+// Trong task
+xxx_data_t *data = xxx_data_get();
+data->field_a = new_value;
+```
+
+**Quy tắc:**
+- Struct là `static` (không export toàn bộ).
+- Chỉ export con trỏ qua hàm getter.
+- **Không dùng malloc** — dùng static allocation.
+
+---
+
+## 6. Logging
+
+### Cấp độ log
+
+| Macro | Dùng khi |
+|-------|---------|
+| `ESP_LOGI(TAG, ...)` | Khởi tạo thành công, trạng thái bình thường |
+| `ESP_LOGW(TAG, ...)` | Cảnh báo (mất kết nối, dữ liệu bất thường) |
+| `ESP_LOGE(TAG, ...)` | Lỗi nghiêm trọng (không tìm thấy sensor...) |
+
+**Không dùng `printf`** — luôn dùng `ESP_LOG*`.
+
+### TAG theo component
+
+```c
+static const char *TAG = "GSR";        // 3-6 ký tự HOA
+static const char *TAG = "MAX30105";   // Tên component
+static const char *TAG = "DHT11";      // Tên cảm biến
+static const char *TAG = "YFS201";     // Tên cảm biến
+```
+
+---
+
+## 7. Error Handling
+
+### ESP_ERROR_CHECK cho Init
+
+```c
+ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_cfg, &handle));
+ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+```
+
+### Kiểm tra giá trị trả về
+
+```c
+esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &nvs);
+if (err != ESP_OK) {
+    ESP_LOGE(TAG, "NVS open failed: %s", esp_err_to_name(err));
+    return;
+}
+```
+
+---
+
+## 8. Kiểu dữ liệu
+
+| Mục đích | Kiểu | Lý do |
+|---------|------|-------|
+| Giá trị ADC 12-bit | `int` hoặc `int32_t` | ESP32 ADC 12-bit |
+| Pulse count | `uint32_t` | Đếm xung, không âm |
+| Nhiệt độ | `float` | Cần precision |
+| Giá trị GSR offset | `int32_t` | Offset có thể âm |
+| Boolean flag | `bool` | Trạng thái on/off |
+| Tick count | `TickType_t` | FreeRTOS API |
+| Kích thước buffer | `static const int` | Kích thước compile-time |
+
+---
+
+## 9. Formatting
+
+- Thụt lề: **4 dấu cách** (không dùng tab).
+- Dòng tối đa: **120 ký tự**.
+- Dấu ngoặc nhọn:
+  - Hàm: mở trên dòng mới cùng cột với tên hàm.
+  - if/for/while: cùng dòng (`} else {`).
+- Toán tử hai ngôi: có dấu cách 2 bên (`a + b`, `x == y`).
+- Con trỏ: `int *ptr` (dấu `*` gần tên).
+
+```c
+// ✅ Đúng
+static void save_calibration_to_nvs(health_data_t *data) {
+    nvs_handle_t nvs;
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "NVS open failed");
+        return;
+    }
+}
+
+// ❌ Sai
+static void save_calibration_to_nvs (health_data_t *data){
+    if(err!=ESP_OK){
+        ESP_LOGE(TAG,"NVS open failed");
+        return;
+    }
+}
+```
+
+---
+
+## 10. Comment — Chỉ khi cần thiết
+
+**KHÔNG comment những gì code đã tự giải thích:**
+
+```c
+// ❌ Thừa — code đã rõ ràng
+counter++;  // Tang bien dem
+
+// ✅ Cần thiết — giải thích ý đồ/thuật toán
+// Offset = baseline target - GSR thực tế của user
+// Nếu user GSR = 1800, offset = 2200 - 1800 = +400
+data->gsr_offset = GSR_TARGET_BASELINE - user_gsr_raw;
+```
+
+---
+
+## 11. GPIO Pull-up cho Sensor
+
+| Cảm biến | Kiểu | Pull-up |
+|---------|------|---------|
+| YF-S201 | Open-collector | `GPIO_PULLUP_ENABLE` (internal) |
+| DHT11 | Bidirectional | `GPIO_PULLUP_ENABLE` (bidirectional mode) |
+| MAX30105 INT | Push-pull output | `GPIO_PULLUP_ENABLE` |
+| DS18B20 | Open-drain | Pull-up ngoài + internal |
+| GSR (ADC) | Analog output | Không cần pull |
+
+---
+
+## 12. Thứ tự include header
+
+```c
+// 1. Header của chính component (nếu có .c tương ứng)
+#include "gsr_sensor.h"
+#include "gsr_config.h"
+
+// 2. Header của component khác trong project
+#include "health_data.h"
+#include "sensor_hub.h"
+
+// 3. Header ESP-IDF driver
+#include "esp_log.h"
+#include "driver/gpio.h"
+#include "nvs_flash.h"
+
+// 4. Header FreeRTOS
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+// 5. Header C chuẩn
+#include <string.h>
+#include <math.h>
+```

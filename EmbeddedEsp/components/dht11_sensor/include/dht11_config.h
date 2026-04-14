@@ -1,13 +1,11 @@
 #pragma once
 
-#include "driver/gpio.h"
-
 // ============================================
 // CẤU HÌNH PHẦN CỨNG - CẢM BIẾN DHT11
 // ============================================
 
 // Chân Data (single wire, bidirectional)
-#define DHT11_PIN               GPIO_NUM_4
+#define DHT11_PIN               4
 #define DHT11_I2C_PULLUP        true
 
 // Tham số timing (µs) — DHT11 datasheet

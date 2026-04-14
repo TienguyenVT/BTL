@@ -39,16 +39,12 @@ export default function Layout() {
   };
 
   const SidebarContent = () => (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-700">
+    <div className="flex flex-col h-full bg-white">
+      <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
         <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
           <Heart size={16} className="text-white" />
         </div>
-        <span className="text-white font-bold text-lg">IoMT Health</span>
-      </div>
-      <div className="px-4 py-3 border-b border-slate-700">
-        <p className="text-slate-400 text-xs">Logged in as</p>
-        <p className="text-white text-sm font-medium truncate">{userName}</p>
+        <span className="text-slate-800 font-bold text-lg">IoMT Health</span>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">
         {navItems.map(({ path, icon: Icon, label }) => {
@@ -61,7 +57,7 @@ export default function Layout() {
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 active
                   ? 'bg-indigo-600 text-white'
-                  : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-indigo-600'
               }`}
             >
               <Icon size={18} />
@@ -75,10 +71,10 @@ export default function Layout() {
           );
         })}
       </nav>
-      <div className="px-3 py-4 border-t border-slate-700">
+      <div className="px-3 py-4 border-t border-slate-200">
         <button
           onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-400 hover:bg-slate-700 hover:text-white w-full transition-colors"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-red-600 w-full transition-colors"
         >
           <LogOut size={18} />
           <span>Logout</span>
@@ -90,7 +86,7 @@ export default function Layout() {
   return (
     <div className="flex h-screen bg-slate-50">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex w-60 bg-slate-800 flex-col flex-shrink-0">
+      <aside className="hidden lg:flex w-60 bg-white flex-col flex-shrink-0">
         <SidebarContent />
       </aside>
 
@@ -98,7 +94,7 @@ export default function Layout() {
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-40 flex">
           <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
-          <aside className="relative w-60 bg-slate-800 flex flex-col z-50">
+          <aside className="relative w-60 bg-white flex flex-col z-50">
             <SidebarContent />
           </aside>
         </div>
