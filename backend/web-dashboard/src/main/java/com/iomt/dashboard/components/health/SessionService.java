@@ -3,6 +3,7 @@ package com.iomt.dashboard.components.health;
 import com.iomt.dashboard.components.device.DeviceEntity;
 import lombok.RequiredArgsConstructor;
 import org.bson.Document;
+import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
@@ -37,6 +38,22 @@ import java.util.stream.Collectors;
 public class SessionService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
+    private static final String LOG_FILE = "C:\\Documents\\BTL\\debug-db05ef7e.log";
+    private static final java.io.PrintWriter LOG_PW;
+    static {
+        try { LOG_PW = new java.io.PrintWriter(new java.io.FileWriter(LOG_FILE, true)); } catch (Exception e) { throw new RuntimeException(e); }
+    }
+    private void dbg(String runId, String loc, String msg, java.util.Map<String,Object> data) {
+        try {
+            java.util.LinkedHashMap<String,Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("sessionId","05ef7e"); entry.put("id","log_"+System.currentTimeMillis());
+            entry.put("timestamp",System.currentTimeMillis());
+            entry.put("runId",runId); entry.put("location",loc);
+            entry.put("message",msg); entry.put("data",data);
+            LOG_PW.println(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(entry));
+            LOG_PW.flush();
+        } catch(Exception e) { log.error("DBG_WRITE_FAILED", e); }
+    }
 
     /** Khoảng gap (ms) de nhan biet phiên mới: 1 phút */
     private static final long SESSION_GAP_MS = 60 * 1000L;
@@ -180,10 +197,34 @@ public class SessionService {
     /**
      * Tra ve session active — query TRỰC TIẾP final_result mà không qua sessions collection.
      * Chi tra ve session thuoc user devices.
+     * @param deviceId Optional — nếu có thì chỉ lọc theo MAC của device đó.
      */
-    public SessionDto getLiveSession(String userId) {
-        List<String> userMacs = getUserDeviceMacs(userId);
-        if (userMacs.isEmpty()) {
+    public SessionDto getLiveSession(String userId, String deviceId) {
+        dbg("H-BE-1","SessionService.getLiveSession:enter","enter getLiveSession",java.util.Map.of("userId",userId,"deviceId",deviceId));
+        List<String> targetMacs;
+
+        if (deviceId != null && !deviceId.isBlank()) {
+            // Chỉ lấy MAC của device được chọn (phải thuộc về user)
+            dbg("H-BE-1","SessionService.getLiveSession:deviceLookup","looking up device by _id",java.util.Map.of("deviceId",deviceId));
+            DeviceEntity device = mongoTemplate.findOne(
+                    new Query(new org.springframework.data.mongodb.core.query.Criteria("_id").is(
+                            new org.bson.types.ObjectId(deviceId))),
+                    DeviceEntity.class, "devices");
+            dbg("H-BE-1","SessionService.getLiveSession:deviceResult","device lookup result",java.util.Map.of("device",device!=null?java.util.Map.of("id",device.getId(),"mac",device.getMacAddress(),"name",device.getName(),"userId",device.getUserId()):"null"));
+            if (device == null || !userId.equals(device.getUserId())) {
+                dbg("H-BE-1","SessionService.getLiveSession:deviceReject","device null or wrong user",java.util.Map.of("deviceNull",device==null,"wrongUser",device!=null&&!userId.equals(device.getUserId())));
+                return null;
+            }
+            String mac = device.getMacAddress() != null ? device.getMacAddress().toLowerCase() : null;
+            targetMacs = mac != null ? java.util.List.of(mac) : java.util.List.of();
+            dbg("H-BE-1","SessionService.getLiveSession:targetMacs","target MACs from device",java.util.Map.of("targetMacs",targetMacs));
+        } else {
+            targetMacs = getUserDeviceMacs(userId);
+            dbg("H-BE-1","SessionService.getLiveSession:allMacs","all user MACs (no filter)",java.util.Map.of("targetMacs",targetMacs));
+        }
+
+        if (targetMacs.isEmpty()) {
+            dbg("H-BE-1","SessionService.getLiveSession:emptyMacs","targetMacs is empty, returning null",java.util.Map.of());
             return null;
         }
 
@@ -191,20 +232,26 @@ public class SessionService {
 
         // Lay 1 ban ghi moi nhat thuoc user devices
         Query latestQuery = new Query(
-                Criteria.where("mac_address").in(userMacs)
+                Criteria.where("mac_address").in(targetMacs)
         ).with(Sort.by(Sort.Direction.DESC, "timestamp")).limit(1);
+        dbg("H-BE-1","SessionService.getLiveSession:latestQuery","querying final_result for latest record",java.util.Map.of("macs",targetMacs,"sortField","timestamp DESC"));
         Document latestDoc = mongoTemplate.findOne(latestQuery, Document.class, "final_result");
+        dbg("H-BE-1","SessionService.getLiveSession:latestResult","latest record result",java.util.Map.of("found",latestDoc!=null,"mac",latestDoc!=null?latestDoc.getString("mac_address"):"null","ts",latestDoc!=null?latestDoc.get("timestamp"):"null"));
 
         if (latestDoc == null) {
+            dbg("H-BE-1","SessionService.getLiveSession:latestNull","no latest doc found, returning null",java.util.Map.of());
             return null;
         }
 
         Instant latestTs = parseTimestamp(latestDoc.get("timestamp"));
+        dbg("H-BE-1","SessionService.getLiveSession:parsedTs","parsed timestamp",java.util.Map.of("latestTs",latestTs,"now",now,"diffMs",Math.abs(now.toEpochMilli()-latestTs.toEpochMilli()),"SESSION_GAP_MS",SESSION_GAP_MS));
 
         // Xac dinh session active: (now - latestTs) < 1 phut
         boolean isActive = Math.abs(now.toEpochMilli() - latestTs.toEpochMilli()) < SESSION_GAP_MS;
+        dbg("H-BE-1","SessionService.getLiveSession:isActive","isActive check",java.util.Map.of("isActive",isActive,"diffMs",Math.abs(now.toEpochMilli()-latestTs.toEpochMilli()),"threshold",SESSION_GAP_MS));
 
         if (!isActive) {
+            dbg("H-BE-1","SessionService.getLiveSession:notActive","session not active, returning null",java.util.Map.of());
             return null;
         }
 
@@ -212,7 +259,7 @@ public class SessionService {
         Instant sessionStart = latestTs.minus(SESSION_GAP_MS, ChronoUnit.MILLIS);
         Query recordsQuery = new Query(
                 Criteria.where("timestamp").gte(sessionStart)
-                        .and("mac_address").in(userMacs)
+                        .and("mac_address").in(targetMacs)
         ).with(Sort.by(Sort.Direction.ASC, "timestamp"));
 
         List<Document> docs = mongoTemplate.find(recordsQuery, Document.class, "final_result");

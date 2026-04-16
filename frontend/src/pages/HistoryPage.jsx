@@ -137,12 +137,9 @@ export default function HistoryPage() {
         <h2 className="text-xl font-semibold text-slate-700 mb-2">
           Bạn chưa đăng ký thiết bị
         </h2>
-        <p className="text-slate-500 mb-6">
-          Vui lòng thêm thiết bị ESP32 để xem dữ liệu sức khỏe của bạn.
-        </p>
         <button
           onClick={() => navigate('/devices')}
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+          className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
         >
           Thêm thiết bị
         </button>
@@ -168,7 +165,7 @@ export default function HistoryPage() {
               onClick={() => setRange(r.hours)}
               className={`px-3 py-1.5 text-sm rounded-lg font-medium transition-colors ${
                 range === r.hours
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-teal-600 text-white'
                   : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
               }`}
             >

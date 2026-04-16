@@ -33,11 +33,11 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 6.0.0
+    version: 5.5.3
 direct_dependencies:
 - espressif/ds18b20
 - espressif/mqtt
 - espressif/onewire_bus
 manifest_hash: d678ffc3882d896410abad841c365fdfb54b6d29a814b95a61bc16a62260905b
-target: esp32
-version: 3.0.0
+target: esp32s3
+version: 2.0.0

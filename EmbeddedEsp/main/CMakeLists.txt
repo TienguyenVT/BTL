@@ -1,30 +1,8 @@
 idf_component_register(
     SRCS
         "main.c"
-        "../components/app_ds18b20/ds18b20.c"
-        "../components/app_ds18b20/thermal_processor.c"
-        "../components/gsr_sensor/gsr_sensor.c"
-        "../components/dht11_sensor/dht11_sensor.c"
-        "../components/health_data/health_data.c"
-        "../components/max30105/max30105.c"
-        "../components/max30105/spo2_algorithm.c"
-        "../components/mqtt_manager/mqtt_manager.c"
-        "../components/sensor_hub/sensor_hub.c"
-        "../components/ssd1306/ssd1306.c"
-        "../components/wifi_manager/wifi_manager.c"
-
     INCLUDE_DIRS
         "."
-        "../components/app_ds18b20/include"
-        "../components/gsr_sensor/include"
-        "../components/dht11_sensor/include"
-        "../components/health_data/include"
-        "../components/max30105/include"
-        "../components/mqtt_manager/include"
-        "../components/sensor_hub/include"
-        "../components/ssd1306/include"
-        "../components/wifi_manager/include"
-
     REQUIRES
         nvs_flash
         freertos
@@ -39,4 +17,13 @@ idf_component_register(
         esp_wifi
         esp_netif
         esp_event
+        app_ds18b20
+        gsr_sensor
+        dht11_sensor
+        health_data
+        max30105
+        mqtt_manager
+        sensor_hub
+        ssd1306
+        wifi_manager
 )

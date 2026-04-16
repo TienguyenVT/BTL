@@ -2,14 +2,15 @@ package com.iomt.dashboard.components.profile;
 
 import com.iomt.dashboard.common.UserUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
-import java.util.Map;
 
 /**
  * Controller: Quan ly thong tin ca nhan (Profile).
@@ -30,7 +31,7 @@ public class ProfileController {
 
     // ================================================================
     // GET /api/profile
-    //    Lay profile cua user. Tao mac dinh neu chua co.
+    //    Lay profile cua user. Tao mac dinh neu chua co (upsert).
     //    Output: ProfileDto (co tinh BMI dong)
     // ================================================================
     @GetMapping
@@ -40,25 +41,23 @@ public class ProfileController {
         String uid = UserUtils.extractUserId(userId);
 
         Query query = new Query(Criteria.where("user_id").is(uid));
-        ProfileEntity profile = mongoTemplate.findOne(query, ProfileEntity.class);
 
-        // Neu chua co, tao profile mac dinh
-        if (profile == null) {
-            profile = new ProfileEntity();
-            profile.userId = uid;
-            profile.age = null;
-            profile.height = null;
-            profile.weight = null;
-            profile.updatedAt = null;
-            mongoTemplate.save(profile);
-        }
+        Update upsert = new Update()
+                .setOnInsert("user_id", uid);
+
+        ProfileEntity profile = mongoTemplate.findAndModify(
+                query, upsert,
+                new FindAndModifyOptions().upsert(true).returnNew(true),
+                ProfileEntity.class
+        );
 
         return ResponseEntity.ok(toDto(profile));
     }
 
     // ================================================================
     // PUT /api/profile
-    //    Cap nhat profile. Chi cap nhat cac truong khac null.
+    //    Cap nhat profile. Chi cap nhat cac truong != null.
+    //    Tao moi neu chua co (upsert).
     //    Input: { age, height, weight }
     //    Output: ProfileDto (da cap nhat)
     // ================================================================
@@ -69,28 +68,25 @@ public class ProfileController {
 
         String uid = UserUtils.extractUserId(userId);
 
-        Query query = new Query(Criteria.where("user_id").is(uid));
-        ProfileEntity profile = mongoTemplate.findOne(query, ProfileEntity.class);
+        Update update = new Update().set("updated_at", Instant.now());
 
-        // Neu chua co, tao moi
-        if (profile == null) {
-            profile = new ProfileEntity();
-            profile.userId = uid;
-        }
-
-        // Cap nhat cac truong khac null
         if (dto.age != null) {
-            profile.age = dto.age;
+            update.set("age", dto.age);
         }
         if (dto.height != null) {
-            profile.height = dto.height;
+            update.set("height", dto.height);
         }
         if (dto.weight != null) {
-            profile.weight = dto.weight;
+            update.set("weight", dto.weight);
         }
 
-        profile.updatedAt = Instant.now();
-        mongoTemplate.save(profile);
+        Query query = new Query(Criteria.where("user_id").is(uid));
+
+        ProfileEntity profile = mongoTemplate.findAndModify(
+                query, update,
+                new FindAndModifyOptions().upsert(true).returnNew(true),
+                ProfileEntity.class
+        );
 
         return ResponseEntity.ok(toDto(profile));
     }

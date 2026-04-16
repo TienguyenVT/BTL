@@ -11,12 +11,19 @@ const authHeader = (userId) => ({ headers: { 'X-User-Id': userId } });
 // Auth
 export const register = (data) => api.post('/auth/register', data);
 export const login = (data) => api.post('/auth/login', data);
+export const getMe = (userId) => api.get('/auth/me', authHeader(userId));
+export const updateUser = (userId, data) => {
+  console.log('[DEBUG] updateUser called - userId:', userId, 'data:', data);
+  return api.put('/auth', data, authHeader(userId));
+};
+export const deleteUser = (userId, password) => api.delete('/auth', { data: { password }, ...authHeader(userId) });
 
 // Profile
 export const getProfile = (userId) => api.get('/profile', authHeader(userId));
 export const updateProfile = (userId, data) => api.put('/profile', data, authHeader(userId));
 
 // Devices
+export const getDevice = (userId, id) => api.get(`/devices/${id}`, authHeader(userId));
 export const getDevices = (userId) => api.get('/devices', authHeader(userId));
 export const addDevice = (userId, data) => api.post('/devices', data, authHeader(userId));
 export const deleteDevice = (userId, id) => api.delete(`/devices/${id}`, authHeader(userId));
@@ -28,7 +35,10 @@ export const getRecentHealth = (userId, limit) => api.get('/health/recent', { pa
 
 // Sessions (Yeu cau X-User-Id header de loc theo device cua user)
 export const getLatestSession = (userId) => api.get('/health/sessions/latest', authHeader(userId));
-export const getLiveSession = (userId) => api.get('/health/sessions/live', authHeader(userId));
+export const getLiveSession = (userId, deviceId) => {
+  const params = deviceId ? { deviceId } : {};
+  return api.get('/health/sessions/live', { params, ...authHeader(userId) });
+};
 export const getSessionById = (sessionId, userId) => api.get(`/health/sessions/${sessionId}`, authHeader(userId));
 export const getSessionsHistory = (hours, userId) => api.get('/health/sessions/history', { params: { hours }, ...authHeader(userId) });
 export const getAllSessions = (userId) => api.get('/health/sessions', authHeader(userId));

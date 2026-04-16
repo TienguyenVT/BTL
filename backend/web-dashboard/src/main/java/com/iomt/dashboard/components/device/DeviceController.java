@@ -122,6 +122,29 @@ public class DeviceController {
     }
 
     // ================================================================
+    // GET /api/devices/{id}
+    //    Lay chi tiet thiet bi.
+    //    Output: DeviceDto | 404
+    // ================================================================
+    @GetMapping("/{id}")
+    public ResponseEntity<DeviceDto> getById(
+            @PathVariable String id,
+            @RequestHeader(value = "X-User-Id", required = false) String userId) {
+
+        String uid = UserUtils.extractUserId(userId);
+
+        Query query = new Query(Criteria.where("_id").is(id)
+                .and("user_id").is(uid));
+
+        DeviceEntity device = mongoTemplate.findOne(query, DeviceEntity.class);
+        if (device == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(toDto(device));
+    }
+
+    // ================================================================
     // DELETE /api/devices/{id}
     //    Xoa thiet bi.
     //    Output: 204 | 404

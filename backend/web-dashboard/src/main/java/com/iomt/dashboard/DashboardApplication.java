@@ -19,6 +19,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class DashboardApplication {
 
     public static void main(String[] args) {
+        System.out.println("[DEBUG] Starting IoMT Web Dashboard on port 8080...");
         SpringApplication.run(DashboardApplication.class, args);
     }
 

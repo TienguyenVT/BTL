@@ -129,7 +129,8 @@ void wifi_manager_init(void) {
 
     if (!provisioned) {
         ESP_LOGI(TAG, "Thiet bi chua co cau hinh mang. Dang phat SoftAP 'IoMT-PTIT' de cho setup...");
-        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_0, NULL, "IoMT-PTIT", NULL));
+        // Sử dụng SECURITY_1 với mã PoP là 12345678
+        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(WIFI_PROV_SECURITY_1, "12345678", "IoMT-PTIT", NULL));
     } else {
         ESP_LOGI(TAG, "Da luu san thong tin WiFi trong NVS. Dang ket noi mang...");
         wifi_prov_mgr_deinit();

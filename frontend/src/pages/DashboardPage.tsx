@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Activity, Droplet, Thermometer, RefreshCw, WifiOff, Clock, Cpu } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Activity, Droplet, Thermometer, RefreshCw, WifiOff, Clock, Cpu, ChevronDown } from 'lucide-react';
 import SessionChart from '../components/SessionChart';
 import { getLiveSession, getEnvironment, getDevices } from '../services/api';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
 const labelColors = { Normal: '#22c55e', Stress: '#f59e0b', Fever: '#ef4444' };
+
+const STORAGE_KEY_SELECTED_DEVICE = 'dashboard_selected_device_id';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -15,7 +17,9 @@ export default function DashboardPage() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [tick, setTick] = useState(0);
-  const [hasDevices, setHasDevices] = useState(null); // null = checking, true/false = result
+  const [hasDevices, setHasDevices] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(() => localStorage.getItem(STORAGE_KEY_SELECTED_DEVICE) || '');
   const userId = localStorage.getItem('backendUserId');
 
   // Check if user has registered devices
@@ -23,29 +27,50 @@ export default function DashboardPage() {
     const checkDevices = async () => {
       if (!userId) {
         setHasDevices(false);
+        setDevices([]);
         return;
       }
       try {
         const res = await getDevices(userId);
-        setHasDevices((res.data || []).length > 0);
+        const deviceList = res.data || [];
+        setDevices(deviceList);
+        setHasDevices(deviceList.length > 0);
+        // Nếu device đã chọn trước đó không còn trong danh sách → reset
+        if (deviceList.length > 0 && !deviceList.find(d => d.id === selectedDeviceId)) {
+          setSelectedDeviceId('');
+          localStorage.removeItem(STORAGE_KEY_SELECTED_DEVICE);
+        }
       } catch {
         setHasDevices(false);
+        setDevices([]);
       }
     };
     checkDevices();
   }, [userId]);
 
   // Poll live session every 1 second (direct final_result query, no rebuild dependency)
-  const fetchSession = async () => {
+  // #region DEBUG: instrument getLiveSession call
+  fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession',message:'FE: getLiveSession called',data:{userId,selectedDeviceId,hasDevices},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  const fetchSession = useCallback(async () => {
     if (!userId || hasDevices === false) {
       setLoading(false);
       return;
     }
     try {
       setError(null);
-      const res = await getLiveSession(userId);
+      // #region DEBUG: before API call
+      fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession:api',message:'FE: calling getLiveSession API',data:{userId,selectedDeviceId,hasDevices},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      const res = await getLiveSession(userId, selectedDeviceId || null);
+      // #region DEBUG: API response
+      fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession:response',message:'FE: API response received',data:{status:res.status,hasData:!!(res.status === 200 && res.data),recordCount:res.data?.records?.length||0,sessionActive:res.data?.active,label:res.data?.label},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setSession(res.status === 204 ? null : res.data);
     } catch (err) {
+      // #region DEBUG: API error
+      fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession:error',message:'FE: API error',data:{status:err.response?.status,message:err.message},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       console.error('Failed to load session:', err);
       setError(err.response?.data?.message || err.message || 'Failed to load session');
     } finally {
@@ -53,7 +78,7 @@ export default function DashboardPage() {
       setLastUpdated(new Date());
       setTick(t => t + 1);
     }
-  };
+  }, [userId, hasDevices, selectedDeviceId]);
 
   // Poll environment every 1 second (from datalake_raw)
   const fetchEnv = async () => {
@@ -73,7 +98,21 @@ export default function DashboardPage() {
     const sessionInterval = setInterval(fetchSession, 1000);
     const envInterval = setInterval(fetchEnv, 1000);
     return () => { clearInterval(sessionInterval); clearInterval(envInterval); };
-  }, [hasDevices, userId]);
+  }, [hasDevices, userId, selectedDeviceId, fetchSession]);
+
+  const handleDeviceChange = (e) => {
+    const deviceId = e.target.value;
+    // #region DEBUG
+    fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:handleDeviceChange',message:'FE: user changed device selection',data:{deviceId,deviceName:devices.find(d=>d.id===deviceId)?.name,mac:devices.find(d=>d.id===deviceId)?.macAddress},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    setSelectedDeviceId(deviceId);
+    if (deviceId) {
+      localStorage.setItem(STORAGE_KEY_SELECTED_DEVICE, deviceId);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_SELECTED_DEVICE);
+    }
+    setSession(null);
+  };
 
   const records = session?.records || [];
   const latestRecord = records.length > 0 ? records[records.length - 1] : null;
@@ -100,18 +139,16 @@ export default function DashboardPage() {
         <h2 className="text-xl font-semibold text-slate-700 mb-2">
           Bạn chưa đăng ký thiết bị
         </h2>
-        <p className="text-slate-500 mb-6">
-          Vui lòng thêm thiết bị ESP32 để xem dữ liệu sức khỏe của bạn.
-        </p>
         <button
           onClick={() => navigate('/devices')}
-          className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
+          className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
         >
           Thêm thiết bị
         </button>
       </div>
     );
   }
+
 
   return (
     <div className="p-4 lg:p-6 max-w-7xl mx-auto space-y-4">
@@ -126,6 +163,24 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {/* Device selector */}
+          {devices.length > 0 && (
+            <div className="relative">
+              <select
+                value={selectedDeviceId}
+                onChange={handleDeviceChange}
+                className="appearance-none pl-3 pr-8 py-2 text-sm bg-white border border-slate-200 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer min-w-[160px]"
+              >
+                <option value="">Tất cả thiết bị</option>
+                {devices.map(d => (
+                  <option key={d.id} value={d.id}>
+                    {d.name || d.macAddress || d.id}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            </div>
+          )}
           {/* Session badge */}
           {session && (
             <div

@@ -41,7 +41,7 @@ export default function Layout() {
   const SidebarContent = () => (
     <div className="flex flex-col h-full bg-white">
       <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-200">
-        <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center">
+        <div className="w-8 h-8 bg-teal-500 rounded-lg flex items-center justify-center">
           <Heart size={16} className="text-white" />
         </div>
         <span className="text-slate-800 font-bold text-lg">IoMT Health</span>
@@ -56,8 +56,8 @@ export default function Layout() {
               onClick={() => setSidebarOpen(false)}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 active
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-indigo-600'
+                  ? 'bg-teal-600 text-white'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-teal-600'
               }`}
             >
               <Icon size={18} />
@@ -105,7 +105,7 @@ export default function Layout() {
         {/* Mobile Header */}
         <header className="lg:hidden flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-indigo-500 rounded-lg flex items-center justify-center">
+            <div className="w-7 h-7 bg-teal-500 rounded-lg flex items-center justify-center">
               <Heart size={14} className="text-white" />
             </div>
             <span className="font-bold text-slate-800">IoMT Health</span>
@@ -129,7 +129,7 @@ export default function Layout() {
                 key={path}
                 to={path}
                 className={`flex-1 flex flex-col items-center py-2 text-xs relative ${
-                  active ? 'text-indigo-600' : 'text-slate-500'
+                  active ? 'text-teal-600' : 'text-slate-500'
                 }`}
               >
                 <Icon size={20} />

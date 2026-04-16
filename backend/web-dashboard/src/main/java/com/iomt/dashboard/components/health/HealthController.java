@@ -223,12 +223,12 @@ public class HealthController {
 
         Document doc = mongoTemplate.findOne(query, Document.class, "datalake_raw");
 
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
         if (doc == null) {
-            return Map.of(
-                    "extTempC", (Double) null,
-                    "extHumidityPct", (Double) null,
-                    "timestamp", (Long) null
-            );
+            result.put("extTempC", null);
+            result.put("extHumidityPct", null);
+            result.put("timestamp", null);
+            return result;
         }
 
         // Fields are inside "sensor" subdocument
@@ -236,11 +236,10 @@ public class HealthController {
         Double roomTemp = sensor != null ? toDouble(sensor.get("dht11_room_temp")) : null;
         Double humidity = sensor != null ? toDouble(sensor.get("dht11_humidity")) : null;
 
-        return Map.of(
-                "extTempC", roomTemp,
-                "extHumidityPct", humidity,
-                "timestamp", datetimeToEpochMs(doc.get("ingested_at"))
-        );
+        result.put("extTempC", roomTemp);
+        result.put("extHumidityPct", humidity);
+        result.put("timestamp", datetimeToEpochMs(doc.get("ingested_at")));
+        return result;
     }
 
     // ================================================================

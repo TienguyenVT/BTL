@@ -99,10 +99,11 @@ public class SessionController {
     // ================================================================
     @GetMapping("/live")
     public ResponseEntity<SessionDto> getLiveSession(
-            @RequestHeader(value = "X-User-Id", required = false) String userId) {
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
+            @RequestParam(required = false) String deviceId) {
 
         String uid = UserUtils.extractUserId(userId);
-        SessionDto session = sessionService.getLiveSession(uid);
+        SessionDto session = sessionService.getLiveSession(uid, deviceId);
         if (session == null) {
             return ResponseEntity.noContent().build();
         }

@@ -1,6 +1,7 @@
 package com.iomt.dashboard.components.profile;
 
 import lombok.Data;
+import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -11,7 +12,7 @@ import java.time.Instant;
  * Collection: "profiles"
  *
  * Cac truong:
- *    - userId   : ID nguoi dung (unique, khong co @Id)
+ *    - userId   : ID nguoi dung (unique, dung lam _id de tranh duplicate)
  *    - age      : Tuoi (nullable)
  *    - height   : Chieu cao cm (nullable)
  *    - weight   : Can nang kg (nullable)
@@ -21,6 +22,7 @@ import java.time.Instant;
 @Document(collection = "profiles")
 public class ProfileEntity {
 
+    @Id
     @Field("user_id")
     public String userId;
 

@@ -62,7 +62,7 @@ export default function DiaryPage() {
         <h1 className="text-xl lg:text-2xl font-bold text-slate-800">Health Diary</h1>
         <button
           onClick={openCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
         >
           <Plus size={16} />
           New Entry
@@ -77,7 +77,7 @@ export default function DiaryPage() {
           placeholder="Search diary entries..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+          className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
         />
       </div>
 
@@ -106,7 +106,7 @@ export default function DiaryPage() {
                   )}
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
-                  <button onClick={() => openEdit(note)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-indigo-600 transition-colors">
+                  <button onClick={() => openEdit(note)} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-teal-600 transition-colors">
                     <Edit2 size={15} />
                   </button>
                   <button onClick={() => setDeleteConfirm(note.id)} className="p-2 rounded-lg hover:bg-red-50 text-slate-500 hover:text-red-500 transition-colors">
@@ -137,7 +137,7 @@ export default function DiaryPage() {
                   value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   placeholder="Entry title..."
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                 />
               </div>
               <div>
@@ -147,7 +147,7 @@ export default function DiaryPage() {
                   onChange={(e) => setForm({ ...form, content: e.target.value })}
                   placeholder="Write your health notes here..."
                   rows={5}
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                  className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
                 />
               </div>
             </div>
@@ -158,7 +158,7 @@ export default function DiaryPage() {
               <button
                 onClick={handleSave}
                 disabled={saving || !form.title.trim() || !form.content.trim()}
-                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
+                className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-colors"
               >
                 <Save size={15} />
                 {saving ? 'Saving...' : 'Save Entry'}
