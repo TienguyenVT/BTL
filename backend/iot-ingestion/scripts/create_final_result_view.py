@@ -2,6 +2,12 @@
 """
 Chuyen final_result thanh MongoDB VIEW (thay vi hard-copy collection).
 View se tu dong reflect tat ca thay doi trong datalake_raw.
+
+final_result VIEW chi chua:
+  device_id, mac_address, timestamp, ingested_at,
+  bpm, spo2, body_temp, gsr_adc,
+  room_temp, humidity,
+  label, confidence
 """
 import os, sys
 sys.path.insert(0, r"c:\Documents\BTL\backend\iot-ingestion")
@@ -18,12 +24,12 @@ db = client[MONGO_DB]
 FINAL_COLL = "final_result"
 
 print("=" * 60)
-print("  CHUYEN final_result -> VIEW")
+print("  CHUYEN final_result -> VIEW (v2)")
+print("  Chi luu: sensor + prediction, KHONG co engineered features")
 print("=" * 60)
 
 # Xoa collection cu (view khong the drop, chi drop neu la collection)
 if FINAL_COLL in db.list_collection_names():
-    # Kiem tra la view hay collection
     try:
         db[FINAL_COLL].drop()
         print("[1] Da xoa collection cu.")
@@ -32,36 +38,49 @@ if FINAL_COLL in db.list_collection_names():
 else:
     print("[1] Khong co collection cu, tiep tuc.")
 
-# Tao view bang aggregation pipeline
+# Tao view bang aggregation pipeline (chi sensor + prediction, KHONG co engineered features)
 pipeline = [
     # Chi lay docs co prediction.label (da duoc gan nhan)
     {"$match": {
         "prediction.label": {"$exists": True, "$ne": None}
     }},
-    # Flatten: tach sensor va prediction ra nhuang field bac nhat
+    # Flatten: tach sensor va prediction ra nhu field bac nhat
     {"$addFields": {
+        # 4 sensor fields
         "bpm":        "$sensor.bpm",
         "spo2":      "$sensor.spo2",
         "body_temp": "$sensor.body_temp",
         "gsr_adc":   "$sensor.gsr_adc",
+        # 2 DHT11 fields
+        "room_temp":   "$sensor.dht11_room_temp",
+        "humidity":    "$sensor.dht11_humidity",
+        # Prediction
         "label":     "$prediction.label",
         "confidence":"$prediction.confidence",
+        # Device
+        "mac_address": "$mac_address",
     }},
-    # Chi giu lai cac fields can thiet
+    # Chi giu lai cac fields can thiet — KHONG co engineered features
     {"$project": {
         "_id": 0,
         "timestamp":   1,
         "device_id":   1,
+        "mac_address": 1,
+        "ingested_at": 1,
+        "source":       1,
+        "data_quality": 1,
+        "schema_version": 1,
+        # 4 sensor
         "bpm":         1,
         "spo2":        1,
         "body_temp":   1,
         "gsr_adc":     1,
+        # 2 DHT11
+        "room_temp":   1,
+        "humidity":    1,
+        # Label
         "label":       1,
         "confidence":  1,
-        "data_quality": 1,
-        "source":       1,
-        "ingested_at":  1,
-        "schema_version": 1,
     }},
     # Sort theo ingested_at giam dan (moi nhat truoc)
     {"$sort": {"ingested_at": -1}},
@@ -69,6 +88,8 @@ pipeline = [
 
 db.create_collection(FINAL_COLL, viewOn="datalake_raw", pipeline=pipeline)
 print("[2] Da tao VIEW '" + FINAL_COLL + "' tren datalake_raw.")
+print("    Chi chua: bpm, spo2, body_temp, gsr_adc, room_temp, humidity, label, confidence")
+print("    KHONG con: bpm_spo2_ratio, temp_gsr_interaction, bpm_temp_product, ...")
 print("    View se tu dong cap nhat khi datalake_raw thay doi.")
 
 # Indexes tren view (MongoDB se apply tren underlying collection)
@@ -76,7 +97,8 @@ try:
     db[FINAL_COLL].create_index([("timestamp", -1)])
     db[FINAL_COLL].create_index([("label", 1)])
     db[FINAL_COLL].create_index([("device_id", 1), ("timestamp", -1)])
-    print("[3] Da tao 3 indexes tren view.")
+    db[FINAL_COLL].create_index([("mac_address", 1), ("timestamp", -1)])
+    print("[3] Da tao 4 indexes tren view.")
 except Exception as e:
     print("[3] Indexes: " + str(e))
 
@@ -92,7 +114,6 @@ for c in coll_info.get("cursor", {}).get("firstBatch", []):
     print("  Type: " + c.get("type", "collection"))
     opts = c.get("options", {})
     print("  View on: " + opts.get("viewOn", "N/A"))
-    print("  Fields (schema): " + str(list(opts.get("pipeline", [{}]))))
 
 total = db[FINAL_COLL].count_documents({})
 print()
@@ -113,8 +134,11 @@ for doc in db[FINAL_COLL].find().limit(5):
     sp2  = doc.get("spo2", "")
     bt   = doc.get("body_temp", "")
     gsr  = doc.get("gsr_adc", "")
+    rt   = doc.get("room_temp", "")
+    hum  = doc.get("humidity", "")
     print("    ts=" + str(ts) + " bpm=" + str(bpm) + " spo2=" + str(sp2) +
           " body_temp=" + str(bt) + " gsr=" + str(gsr) +
+          " room_temp=" + str(rt) + " humidity=" + str(hum) +
           " label=" + str(lbl) + " conf=" + str(conf))
 
 print()
@@ -127,11 +151,11 @@ for coll_name in db.list_collection_names():
     s = c.find_one() or {}
     fields = sorted([k for k in s.keys() if k != "_id"])
     if coll_name == FINAL_COLL:
-        role = "KET QUA CUOI CUNG (VIEW - tu dong update)"
+        role = "KET QUA CUOI CUNG (VIEW - chi sensor + prediction)"
     elif coll_name == "datalake_raw":
-        role = "DATA LAKE (raw + metadata, vinh vien)"
+        role = "DATA LAKE (raw + metadata + features, vinh vien)"
     elif coll_name == "realtime_health_data":
-        role = "DATAWAREHOUSE (12 features, chua gan nhan)"
+        role = "DATAWAREHOUSE (chi sensor, chua gan nhan)"
     elif coll_name == "training_health_data":
         role = "TRAINING DATA (co label, huan luyen ML)"
     else:

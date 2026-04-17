@@ -4,12 +4,12 @@ import { LayoutDashboard, Clock, BookOpen, User, Cpu, Bell, LogOut, Menu, Heart 
 import { getAlertCount } from '../services/api';
 
 const navItems = [
-  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/history', icon: Clock, label: 'History' },
-  { path: '/diary', icon: BookOpen, label: 'Diary' },
-  { path: '/profile', icon: User, label: 'Profile' },
-  { path: '/devices', icon: Cpu, label: 'Devices' },
-  { path: '/alerts', icon: Bell, label: 'Alerts' },
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Trang chu' },
+  { path: '/history', icon: Clock, label: 'Lich su' },
+  { path: '/diary', icon: BookOpen, label: 'Nhat ky' },
+  { path: '/profile', icon: User, label: 'Ho so' },
+  { path: '/devices', icon: Cpu, label: 'Thiet bi' },
+  { path: '/alerts', icon: Bell, label: 'Canh bao' },
 ];
 
 export default function Layout() {
@@ -77,7 +77,7 @@ export default function Layout() {
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-red-600 w-full transition-colors"
         >
           <LogOut size={18} />
-          <span>Logout</span>
+          <span>Dang xuat</span>
         </button>
       </div>
     </div>

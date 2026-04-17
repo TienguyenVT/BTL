@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Fix final_result VIEW:
+Fix final_result VIEW (v2):
   1. Drop final_result cu (collection hoac view)
-  2. Tao VIEW moi voi schema chinh xac khop voi datalake_raw hien tai
+  2. Tao VIEW moi chi voi sensor + prediction
   3. Thong ke ket qua
 
-Lua y:
-  - VIEW tu dong reflect thay doi trong datalake_raw
-  - Khong can chay lai script nay khi co data moi
-  - Chi can chay lai neu muon thay doi pipeline
+final_result VIEW chi chua:
+  device_id, mac_address, timestamp, ingested_at,
+  bpm, spo2, body_temp, gsr_adc,
+  room_temp, humidity,
+  label, confidence
 """
 import os
 import sys
@@ -26,7 +27,8 @@ db = client[MONGO_DB]
 FINAL_COLL = "final_result"
 
 print("=" * 60)
-print("  FIX final_result VIEW")
+print("  FIX final_result VIEW (v2)")
+print("  Chi luu: sensor + prediction, KHONG co engineered features")
 print("=" * 60)
 
 # ── Step 1: Inspect datalake_raw schema ─────────────────────
@@ -54,14 +56,13 @@ else:
     print("    Chua co final_result, bo qua.")
 
 # ── Step 3: Build VIEW pipeline ─────────────────────────────
-# Chu y: datalake_raw co sensor.dht11_room_temp, sensor.dht11_humidity
-# View se flatten cac fields nay thanh room_temp, humidity
+# KHONG con engineered features trong VIEW
 pipeline = [
     # Chi lay docs da co prediction (da duoc gan nhan)
     {"$match": {
         "prediction.label": {"$exists": True, "$ne": None}
     }},
-    # Flatten sensor subdocument -> top-level fields
+    # Flatten sensor + prediction -> top-level fields
     {"$addFields": {
         # 4 core sensor fields
         "bpm":         "$sensor.bpm",
@@ -71,27 +72,25 @@ pipeline = [
         # 2 DHT11 fields (Node-RED luu la dht11_room_temp / dht11_humidity)
         "room_temp":   "$sensor.dht11_room_temp",
         "humidity":    "$sensor.dht11_humidity",
-        # Full features (10 fields)
-        "bpm_spo2_ratio":              "$features.bpm_spo2_ratio",
-        "temp_gsr_interaction":        "$features.temp_gsr_interaction",
-        "bpm_temp_product":            "$features.bpm_temp_product",
-        "spo2_gsr_ratio":             "$features.spo2_gsr_ratio",
-        "bpm_deviation":              "$features.bpm_deviation",
-        "temp_deviation":             "$features.temp_deviation",
-        "gsr_deviation":             "$features.gsr_deviation",
-        "physiological_stress_index": "$features.physiological_stress_index",
-        "heat_index":                 "$features.heat_index",
-        "comfort_index":              "$features.comfort_index",
         # Prediction
         "label":       "$prediction.label",
         "confidence":  "$prediction.confidence",
+        # mac_address: top-level trong datalake_raw (Node-RED v5+)
+        # fallback sang raw_payload.mac_address neu can (backward compat)
+        "mac_address": {
+            "$ifNull": [
+                "$mac_address",
+                {"$ifNull": ["$raw_payload.mac_address", None]}
+            ]
+        },
     }},
-    # Project chi cac fields can thiet
+    # Project chi cac fields can thiet — KHONG co engineered features
     {"$project": {
         "_id": 0,
         # Time + device
         "timestamp":    1,
         "device_id":   1,
+        "mac_address": 1,
         "ingested_at": 1,
         "source":       1,
         "data_quality": 1,
@@ -104,22 +103,9 @@ pipeline = [
         # 2 DHT11
         "room_temp":   1,
         "humidity":    1,
-        # 10 engineered features
-        "bpm_spo2_ratio":              1,
-        "temp_gsr_interaction":        1,
-        "bpm_temp_product":            1,
-        "spo2_gsr_ratio":             1,
-        "bpm_deviation":              1,
-        "temp_deviation":             1,
-        "gsr_deviation":             1,
-        "physiological_stress_index": 1,
-        "heat_index":                 1,
-        "comfort_index":              1,
         # Label + confidence
         "label":       1,
         "confidence":  1,
-        # Backward compat: mac_address from raw_payload if exists
-        "mac_address": "$raw_payload.mac_address",
     }},
     # Sort: moi nhat truoc (cho query default)
     {"$sort": {"ingested_at": -1}},
@@ -127,7 +113,8 @@ pipeline = [
 
 db.create_collection(FINAL_COLL, viewOn="datalake_raw", pipeline=pipeline)
 print("\n[2] Da tao VIEW '" + FINAL_COLL + "' (view tren datalake_raw).")
-print("    View tu dong reflect thay doi khi datalake_raw insert moi.")
+print("    Chi chua: bpm, spo2, body_temp, gsr_adc, room_temp, humidity, label, confidence")
+print("    KHONG con: bpm_spo2_ratio, temp_gsr_interaction, bpm_temp_product, ...")
 
 # ── Step 4: Verify VIEW ─────────────────────────────────────
 total = db[FINAL_COLL].count_documents({})
@@ -137,7 +124,6 @@ if total == 0:
     print("    WARNING: VIEW co 0 docs!")
     print("    Nguyen nhan: datalake_raw chua co docs nao co prediction.label.")
     print("    Kiem tra: MQTT dang chay? Python /predict dang chay?")
-    # Check prediction
     has_pred = db["datalake_raw"].count_documents({"prediction.label": {"$exists": True, "$ne": None}})
     print("    datalake_raw docs co prediction.label: " + str(has_pred))
 else:
@@ -145,7 +131,6 @@ else:
     for r in db[FINAL_COLL].aggregate([{"$group": {"_id": "$label", "count": {"$sum": 1}}}]):
         print("    " + str(r["_id"]) + ": " + str(r["count"]))
 
-    # Sample
     sample = db[FINAL_COLL].find_one()
     if sample:
         print("\n[5] Mau document (khong _id):")
@@ -166,24 +151,24 @@ for coll_name in db.list_collection_names():
         s = c.find_one() or {}
         fields = sorted([k for k in s.keys() if k != "_id"])
         if coll_name == FINAL_COLL:
-            role = ">>> KET QUA CUOI (VIEW)"
+            role = ">>> KET QUA CUOI (VIEW - chi sensor + prediction)"
         elif coll_name == "datalake_raw":
-            role = "DATA LAKE (Nguon chuan)"
+            role = "DATA LAKE (raw + metadata + features, vinh vien)"
         elif coll_name == "realtime_health_data":
-            role = "DATAWAREHOUSE"
+            role = "DATAWAREHOUSE (chi sensor, chua gan nhan)"
         elif coll_name == "training_health_data":
             role = "TRAINING DATA"
         else:
             role = ""
-        print(f"\n  [{coll_name}]  {role}")
-        print(f"    Docs: {total}")
-        print(f"    Fields: {fields}")
+        print("\n  [" + coll_name + "]  " + role)
+        print("    Docs: " + str(total))
+        print("    Fields: " + str(fields))
     except Exception as e:
-        print(f"\n  [{coll_name}]  ERROR: {e}")
+        print("\n  [" + coll_name + "]  ERROR: " + str(e))
 
 client.close()
 print("\n" + "=" * 60)
-print("  HOAN TAT! Hay restart backend Spring Boot.")
+print("  HOAN TAT! Hay deploy Node-RED flow va chay script nay.")
 print("  Sau do xoa sessions collection: db.sessions.drop()")
 print("  Hoac chay: python scripts/clear_sessions.py")
 print("=" * 60)

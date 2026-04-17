@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Tao lai final_result VIEW voi day du 6 sensor fields + 2 DHT11 features.
+Tao lai final_result VIEW (chi sensor + prediction, KHONG co engineered features).
+View se tu dong reflect thay doi trong datalake_raw.
+
+final_result VIEW chi chua:
+  device_id, mac_address, timestamp, ingested_at,
+  bpm, spo2, body_temp, gsr_adc,
+  room_temp, humidity,
+  label, confidence
 """
 import os, sys
 sys.path.insert(0, r"c:\Documents\BTL\backend\iot-ingestion")
@@ -17,7 +24,8 @@ db = client[MONGO_DB]
 FINAL_COLL = "final_result"
 
 print("=" * 60)
-print("  TAO / CAP NHAT final_result VIEW")
+print("  TAO / CAP NHAT final_result VIEW (v2)")
+print("  Chi luu: sensor + prediction, KHONG co engineered features")
 print("=" * 60)
 
 # Xoa collection/view cu
@@ -28,41 +36,29 @@ if FINAL_COLL in existing:
 else:
     print("[1] Chua co " + FINAL_COLL + ", tiep tuc.")
 
-# Tao VIEW moi voi day du 8 sensor/engineered fields
+# Tao VIEW moi chi voi sensor + prediction (khong co engineered features)
 pipeline = [
     # Chi lay docs co prediction.label
     {"$match": {
         "prediction.label": {"$exists": True, "$ne": None}
     }},
-    # Flatten sensor + features + prediction + device ra bac nhat
+    # Flatten sensor + prediction + device ra bac nhat
     {"$addFields": {
-        # 6 sensor fields (4 cu + 2 DHT11 moi)
+        # 4 sensor fields
         "bpm":        "$sensor.bpm",
         "spo2":      "$sensor.spo2",
         "body_temp": "$sensor.body_temp",
         "gsr_adc":   "$sensor.gsr_adc",
-        # 2 DHT11 fields (Node-RED v4 ghi sensor.dht11_room_temp, sensor.dht11_humidity)
+        # 2 DHT11 fields
         "room_temp":   "$sensor.dht11_room_temp",
         "humidity":    "$sensor.dht11_humidity",
-        # 8 engineered features (6 cu + 2 DHT11)
-        "bpm_spo2_ratio":             "$features.bpm_spo2_ratio",
-        "temp_gsr_interaction":       "$features.temp_gsr_interaction",
-        "bpm_temp_product":           "$features.bpm_temp_product",
-        "spo2_gsr_ratio":            "$features.spo2_gsr_ratio",
-        "bpm_deviation":             "$features.bpm_deviation",
-        "temp_deviation":             "$features.temp_deviation",
-        "gsr_deviation":             "$features.gsr_deviation",
-        "physiological_stress_index":  "$features.physiological_stress_index",
-        # DHT11 features
-        "heat_index":    "$features.heat_index",
-        "comfort_index":  "$features.comfort_index",
         # Prediction
         "label":      "$prediction.label",
         "confidence": "$prediction.confidence",
         # Device identity
         "mac_address": "$mac_address",
     }},
-    # Project chi cac fields can thiet
+    # Project chi cac fields can thiet — KHONG co engineered features
     {"$project": {
         "_id": 0,
         # Thoi gian + thiet bi
@@ -72,25 +68,15 @@ pipeline = [
         "ingested_at": 1,
         "source":       1,
         "data_quality": 1,
-        # 6 sensor
+        # 4 sensor
         "bpm":         1,
         "spo2":        1,
         "body_temp":   1,
         "gsr_adc":     1,
+        # 2 DHT11
         "room_temp":   1,
         "humidity":    1,
-        # 10 engineered features
-        "bpm_spo2_ratio":             1,
-        "temp_gsr_interaction":        1,
-        "bpm_temp_product":           1,
-        "spo2_gsr_ratio":             1,
-        "bpm_deviation":             1,
-        "temp_deviation":             1,
-        "gsr_deviation":             1,
-        "physiological_stress_index": 1,
-        "heat_index":                1,
-        "comfort_index":             1,
-        # Label
+        # Label + confidence
         "label":       1,
         "confidence":  1,
         "schema_version": 1,
@@ -101,7 +87,8 @@ pipeline = [
 
 db.create_collection(FINAL_COLL, viewOn="datalake_raw", pipeline=pipeline)
 print("[2] Da tao VIEW '" + FINAL_COLL + "' (view tren datalake_raw).")
-print("    Tu dong cap nhat khi datalake_raw thay doi.")
+print("    Chi chua: bpm, spo2, body_temp, gsr_adc, room_temp, humidity, label, confidence")
+print("    KHONG con: bpm_spo2_ratio, temp_gsr_interaction, bpm_temp_product, ...")
 
 # Verify
 total = db[FINAL_COLL].count_documents({})
@@ -129,19 +116,13 @@ print("[6] Kiem tra DHT11 fields (datalake_raw):")
 datalake_sample = db["datalake_raw"].find_one()
 if datalake_sample:
     sensor = datalake_sample.get("sensor", {})
-    features = datalake_sample.get("features", {})
     print("    sensor fields: " + str(sorted(sensor.keys())))
-    print("    features fields: " + str(sorted(features.keys())))
-    has_room = "room_temp" in sensor
-    has_hum  = "humidity"  in sensor
-    has_hi   = "heat_index"    in features
-    has_ci   = "comfort_index" in features
-    print("    co room_temp: " + str(has_room))
-    print("    co humidity:  " + str(has_hum))
-    print("    co heat_index:    " + str(has_hi))
-    print("    co comfort_index: " + str(has_ci))
+    has_room = "dht11_room_temp" in sensor
+    has_hum  = "dht11_humidity"  in sensor
+    print("    co dht11_room_temp: " + str(has_room))
+    print("    co dht11_humidity:  " + str(has_hum))
 
-# He thong 4 bang + view
+# He thong collections + view
 print()
 print("=" * 60)
 print("  HE THONG MONGODB SAU CAP NHAT")
@@ -152,11 +133,11 @@ for coll_name in db.list_collection_names():
     s = c.find_one() or {}
     fields = sorted([k for k in s.keys() if k != "_id"])
     if coll_name == FINAL_COLL:
-        role = "KET QUA CUOI CUNG (VIEW)"
+        role = "KET QUA CUOI CUNG (VIEW - chi sensor + prediction)"
     elif coll_name == "datalake_raw":
-        role = "DATA LAKE"
+        role = "DATA LAKE (raw + metadata + features, vinh vien)"
     elif coll_name == "realtime_health_data":
-        role = "DATAWAREHOUSE"
+        role = "DATAWAREHOUSE (chi sensor, chua gan nhan)"
     elif coll_name == "training_health_data":
         role = "TRAINING DATA"
     else:
@@ -169,5 +150,5 @@ for coll_name in db.list_collection_names():
 client.close()
 print()
 print("=" * 60)
-print("  HOAN TAT!")
+print("  HOAN TAT! Hay deploy Node-RED flow va chay script nay.")
 print("=" * 60)

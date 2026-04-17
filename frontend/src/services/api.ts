@@ -27,6 +27,7 @@ export const getDevice = (userId, id) => api.get(`/devices/${id}`, authHeader(us
 export const getDevices = (userId) => api.get('/devices', authHeader(userId));
 export const addDevice = (userId, data) => api.post('/devices', data, authHeader(userId));
 export const deleteDevice = (userId, id) => api.delete(`/devices/${id}`, authHeader(userId));
+export const renameDevice = (userId, id, name) => api.patch(`/devices/${id}`, { name }, authHeader(userId));
 
 // Health (READ-ONLY)
 export const getLatestHealth = (userId) => api.get('/health/latest', authHeader(userId));
@@ -40,8 +41,19 @@ export const getLiveSession = (userId, deviceId) => {
   return api.get('/health/sessions/live', { params, ...authHeader(userId) });
 };
 export const getSessionById = (sessionId, userId) => api.get(`/health/sessions/${sessionId}`, authHeader(userId));
-export const getSessionsHistory = (hours, userId) => api.get('/health/sessions/history', { params: { hours }, ...authHeader(userId) });
+export const getSessionsHistory = (hours, userId, deviceId) => {
+  const params = { hours };
+  if (deviceId) params.deviceId = deviceId;
+  return api.get('/health/sessions/history', { params, ...authHeader(userId) });
+};
 export const getAllSessions = (userId) => api.get('/health/sessions', authHeader(userId));
+
+// Fever/Stress records from final_result (paginated) — for AlertsPage
+export const getFeverStressRecords = (userId, page, size, deviceId) => {
+  const params = { page, size };
+  if (deviceId) params.deviceId = deviceId;
+  return api.get('/health/sessions/fever-stress-records', { params, ...authHeader(userId) });
+};
 
 // Environment (realtime 1s)
 export const getEnvironment = () => api.get('/health/environment');
@@ -51,10 +63,14 @@ export const getDiaryNotes = (userId) => api.get('/diary-notes', authHeader(user
 export const createDiaryNote = (userId, data) => api.post('/diary-notes', data, authHeader(userId));
 export const updateDiaryNote = (userId, id, data) => api.put(`/diary-notes/${id}`, data, authHeader(userId));
 export const deleteDiaryNote = (userId, id) => api.delete(`/diary-notes/${id}`, authHeader(userId));
+export const getDiaryNotesByTimeRange = (userId, from, to) =>
+  api.get('/diary-notes/by-time-range', { params: { from, to }, ...authHeader(userId) });
 
 // Alerts
 export const getAlerts = (userId) => api.get('/alerts', authHeader(userId));
 export const getAlertCount = (userId) => api.get('/alerts/count', authHeader(userId));
 export const deleteAlert = (userId, id) => api.delete(`/alerts/${id}`, authHeader(userId));
+export const getUnreadAlerts = (userId) => api.get('/alerts/unread', authHeader(userId));
+export const markAlertRead = (userId, id) => api.patch(`/alerts/${id}/read`, {}, authHeader(userId));
 
 export default api;

@@ -44,6 +44,12 @@ public class SessionDto {
     /** Danh sách bản ghi — chỉ điền khi gọi /sessions/{id} */
     public List<HealthRecordDto> records;
 
+    /** ID của thiết bị chứa các bản ghi trong phiên (ObjectId của devices collection) */
+    public String deviceId;
+
+    /** Tên thiết bị (thuận tiện hiển thị trên frontend) */
+    public String deviceName;
+
     /**
      * DTO: Một bản ghi sức khỏe trong phiên.
      * Tương ứng với một document trong final_result.

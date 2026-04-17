@@ -10,6 +10,7 @@ import DiaryPage from './pages/DiaryPage';
 import ProfilePage from './pages/ProfilePage';
 import DevicesPage from './pages/DevicesPage';
 import AlertsPage from './pages/AlertsPage';
+import AlertDiaryPrompt from './components/AlertDiaryPrompt';
 
 const AppRoutes = () => {
   const { isLoadingAuth } = useAuth();
@@ -44,6 +45,7 @@ function App() {
       <QueryClientProvider client={queryClientInstance}>
         <Router>
           <AppRoutes />
+          <AlertDiaryPrompt />
         </Router>
         <Toaster />
       </QueryClientProvider>

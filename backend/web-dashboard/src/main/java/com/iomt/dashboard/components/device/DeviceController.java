@@ -14,6 +14,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.springframework.data.mongodb.core.query.Update;
+
 /**
  * Controller: Quan ly thiet bi ESP32.
  * Nguoi dung dang ky thiet bi bang MAC Address.
@@ -23,6 +25,7 @@ import java.util.stream.Collectors;
  * ENDPOINTS:
  *    POST /api/devices          — Them thiet bi
  *    GET /api/devices           — Danh sach thiet bi
+ *    PATCH /api/devices/{id}    — Doi ten thiet bi
  *    DELETE /api/devices/{id}   — Xoa thiet bi
  */
 @RestController
@@ -94,7 +97,7 @@ public class DeviceController {
 
     private String normalizeMac(String mac) {
         if (mac == null) return null;
-        return mac.trim().toLowerCase();
+        return mac.trim().toUpperCase();
     }
 
     // ================================================================
@@ -142,6 +145,43 @@ public class DeviceController {
         }
 
         return ResponseEntity.ok(toDto(device));
+    }
+
+    // ================================================================
+    // PATCH /api/devices/{id}
+    //    Doi ten thiet bi.
+    //    Input: { name }
+    //    Output: DeviceDto | 400 | 404
+    // ================================================================
+    @PatchMapping("/{id}")
+    public ResponseEntity<DeviceDto> rename(
+            @PathVariable String id,
+            @RequestBody DeviceDto dto,
+            @RequestHeader(value = "X-User-Id", required = false) String userId) {
+
+        String uid = UserUtils.extractUserId(userId);
+
+        if (dto.name == null || dto.name.isBlank()) {
+            DeviceDto err = new DeviceDto();
+            err.message = "Ten thiet bi khong duoc de trong";
+            return ResponseEntity.badRequest().body(err);
+        }
+
+        Query query = new Query(Criteria.where("_id").is(id)
+                .and("user_id").is(uid));
+
+        DeviceEntity device = mongoTemplate.findOne(query, DeviceEntity.class);
+        if (device == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Update update = new Update().set("name", dto.name.trim());
+        mongoTemplate.updateFirst(query, update, DeviceEntity.class);
+
+        device.name = dto.name.trim();
+        DeviceDto response = toDto(device);
+        response.message = "Doi ten thanh cong";
+        return ResponseEntity.ok(response);
     }
 
     // ================================================================

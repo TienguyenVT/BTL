@@ -24,39 +24,19 @@ import java.util.stream.Collectors;
  * Service: Phát hiện và quản lý phiên đo (Session).
  *
  * Luồng xử lý:
- * 1. Doc ALL records tu final_result, sort theo timestamp ASC (thoi gian ESP32 do)
- * 2. Quet lan luot: neu 2 ban ghi cach nhau > 1 phut → phiên mới
- * 3. Moi phiên: tinh avg, label chinh (mode cua predicted_label)
- * 4. active = (hieu thoi gian tu ban ghi cuoi cung den hien tai < 1 phut)
- * 5. LUU: chi save/update phiên moi hoac phiên active
- *
- * Chú ý: Dùng trường "timestamp" (thời gian ESP32 đo) thay vì "ingested_at"
- * (thời gian server nhận) để tránh fragmentation do network delay.
+ * 1. Query final_result với filter MAC, sort theo timestamp
+ * 2. Kiểm tra active: bản ghi mới nhất trong vòng 5 phút
+ * 3. Lay toàn bộ records trong cửa sổ 5 phút, lọc theo MAC
+ * 4. Tính avg, label (mode của predicted_label)
  */
 @Service
 @RequiredArgsConstructor
 public class SessionService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
-    private static final String LOG_FILE = "C:\\Documents\\BTL\\debug-db05ef7e.log";
-    private static final java.io.PrintWriter LOG_PW;
-    static {
-        try { LOG_PW = new java.io.PrintWriter(new java.io.FileWriter(LOG_FILE, true)); } catch (Exception e) { throw new RuntimeException(e); }
-    }
-    private void dbg(String runId, String loc, String msg, java.util.Map<String,Object> data) {
-        try {
-            java.util.LinkedHashMap<String,Object> entry = new java.util.LinkedHashMap<>();
-            entry.put("sessionId","05ef7e"); entry.put("id","log_"+System.currentTimeMillis());
-            entry.put("timestamp",System.currentTimeMillis());
-            entry.put("runId",runId); entry.put("location",loc);
-            entry.put("message",msg); entry.put("data",data);
-            LOG_PW.println(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(entry));
-            LOG_PW.flush();
-        } catch(Exception e) { log.error("DBG_WRITE_FAILED", e); }
-    }
 
-    /** Khoảng gap (ms) de nhan biet phiên mới: 1 phút */
-    private static final long SESSION_GAP_MS = 60 * 1000L;
+    /** Khoảng gap (ms): bản ghi mới nhất trong vòng 5 phút → session active */
+    private static final long SESSION_GAP_MS = 5 * 60 * 1000L;
 
     /** ESP32 gửi timestamp ở múi giờ Việt Nam UTC+7 */
     private static final ZoneOffset VN_ZONE = ZoneOffset.ofHours(7);
@@ -76,8 +56,11 @@ public class SessionService {
         Query query = new Query(Criteria.where("user_id").is(userId));
         List<DeviceEntity> devices = mongoTemplate.find(query, DeviceEntity.class, "devices");
         return devices.stream()
-                .map(d -> d.getMacAddress() != null ? d.getMacAddress().toLowerCase() : null)
+                .map(d -> d.getMacAddress())
                 .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(m -> !m.isBlank())
+                .map(String::toUpperCase)
                 .toList();
     }
 
@@ -95,23 +78,23 @@ public class SessionService {
             return List.of();
         }
 
-        // Lay sessions co it nhat 1 ban ghi thuoc user devices
         Query query = new Query().with(Sort.by(Sort.Direction.DESC, "start_time"));
         List<SessionEntity> allEntities = mongoTemplate.find(query, SessionEntity.class, "sessions");
 
-        // Loc chi nhung session co mac thuoc user
+        Map<String, String> macToName = buildMacToNameMap();
+
         return allEntities.stream()
-                .filter(entity -> {
-                    // Kiem tra session co ban ghi thuoc user devices khong
-                    List<Document> relatedDocs = findSessionRecords(entity, userMacs);
-                    return !relatedDocs.isEmpty();
-                })
                 .map(entity -> {
+                    List<Document> relatedDocs = findSessionRecords(entity, userMacs);
+                    if (relatedDocs.isEmpty()) return null;
                     SessionDto dto = toDto(entity);
-                    // Chi lay nhung ban ghi thuoc user devices
-                    dto.setRecordCount((int) findSessionRecords(entity, userMacs).size());
+                    dto.setRecordCount(relatedDocs.size());
+                    String firstMac = relatedDocs.get(0).getString("mac_address");
+                    dto.setDeviceId(findDeviceIdByMac(userMacs, firstMac));
+                    dto.setDeviceName(macToName.get(firstMac));
                     return dto;
                 })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
@@ -119,9 +102,25 @@ public class SessionService {
      * Tra ve danh sach phiên trong khoang N gio gan day.
      * Chi tra ve session co ban ghi thuoc device cua user.
      */
-    public List<SessionDto> getSessionsInRange(int hours, String userId) {
-        List<String> userMacs = getUserDeviceMacs(userId);
-        if (userMacs.isEmpty()) {
+    public List<SessionDto> getSessionsInRange(int hours, String userId, String deviceId) {
+        List<String> resolvedMacs;
+        String resolvedName = null;
+
+        if (deviceId != null && !deviceId.isBlank()) {
+            DeviceEntity device = mongoTemplate.findOne(
+                    new Query(new Criteria("_id").is(new ObjectId(deviceId))),
+                    DeviceEntity.class, "devices");
+            if (device == null || !userId.equals(device.getUserId())) {
+                return List.of();
+            }
+            String mac = device.getMacAddress();
+            resolvedMacs = mac != null && !mac.isBlank() ? List.of(mac.trim().toUpperCase()) : List.of();
+            resolvedName = device.getName();
+        } else {
+            resolvedMacs = getUserDeviceMacs(userId);
+        }
+
+        if (resolvedMacs.isEmpty()) {
             return List.of();
         }
 
@@ -131,14 +130,18 @@ public class SessionService {
         ).with(Sort.by(Sort.Direction.DESC, "start_time"));
         List<SessionEntity> allEntities = mongoTemplate.find(query, SessionEntity.class, "sessions");
 
+        final List<String> macs = resolvedMacs;
+        final String name = resolvedName;
         return allEntities.stream()
                 .filter(entity -> {
-                    List<Document> relatedDocs = findSessionRecords(entity, userMacs);
+                    List<Document> relatedDocs = findSessionRecords(entity, macs);
                     return !relatedDocs.isEmpty();
                 })
                 .map(entity -> {
                     SessionDto dto = toDto(entity);
-                    dto.setRecordCount((int) findSessionRecords(entity, userMacs).size());
+                    dto.setRecordCount((int) findSessionRecords(entity, macs).size());
+                    dto.setDeviceId(deviceId);
+                    dto.setDeviceName(name);
                     return dto;
                 })
                 .collect(Collectors.toList());
@@ -159,13 +162,11 @@ public class SessionService {
         ).with(Sort.by(Sort.Direction.DESC, "start_time"));
         List<SessionEntity> activeEntities = mongoTemplate.find(query, SessionEntity.class, "sessions");
 
-        // Tim session active co ban ghi thuoc user devices
         for (SessionEntity entity : activeEntities) {
             List<Document> relatedDocs = findSessionRecords(entity, userMacs);
             if (!relatedDocs.isEmpty()) {
                 SessionDto dto = toDto(entity);
                 dto.setRecordCount(relatedDocs.size());
-                // Them records chi tiet
                 dto.setRecords(relatedDocs.stream().map(this::docToRecord).collect(Collectors.toList()));
                 return dto;
             }
@@ -194,73 +195,75 @@ public class SessionService {
         return mongoTemplate.find(query, Document.class, "final_result");
     }
 
+    /** Fields needed by getLiveSession (docToRecord + computeAvg) — avoid fetching all 25 fields */
+    private static final String[] SESSION_PROJECTION_FIELDS = {
+            "_id", "timestamp", "ingested_at", "mac_address",
+            "bpm", "spo2", "body_temp", "gsr_adc",
+            "room_temp", "humidity", "label", "confidence"
+    };
+
     /**
      * Tra ve session active — query TRỰC TIẾP final_result mà không qua sessions collection.
      * Chi tra ve session thuoc user devices.
      * @param deviceId Optional — nếu có thì chỉ lọc theo MAC của device đó.
      */
     public SessionDto getLiveSession(String userId, String deviceId) {
-        dbg("H-BE-1","SessionService.getLiveSession:enter","enter getLiveSession",java.util.Map.of("userId",userId,"deviceId",deviceId));
         List<String> targetMacs;
 
         if (deviceId != null && !deviceId.isBlank()) {
-            // Chỉ lấy MAC của device được chọn (phải thuộc về user)
-            dbg("H-BE-1","SessionService.getLiveSession:deviceLookup","looking up device by _id",java.util.Map.of("deviceId",deviceId));
             DeviceEntity device = mongoTemplate.findOne(
-                    new Query(new org.springframework.data.mongodb.core.query.Criteria("_id").is(
-                            new org.bson.types.ObjectId(deviceId))),
+                    new Query(new Criteria("_id").is(new ObjectId(deviceId))),
                     DeviceEntity.class, "devices");
-            dbg("H-BE-1","SessionService.getLiveSession:deviceResult","device lookup result",java.util.Map.of("device",device!=null?java.util.Map.of("id",device.getId(),"mac",device.getMacAddress(),"name",device.getName(),"userId",device.getUserId()):"null"));
             if (device == null || !userId.equals(device.getUserId())) {
-                dbg("H-BE-1","SessionService.getLiveSession:deviceReject","device null or wrong user",java.util.Map.of("deviceNull",device==null,"wrongUser",device!=null&&!userId.equals(device.getUserId())));
                 return null;
             }
-            String mac = device.getMacAddress() != null ? device.getMacAddress().toLowerCase() : null;
-            targetMacs = mac != null ? java.util.List.of(mac) : java.util.List.of();
-            dbg("H-BE-1","SessionService.getLiveSession:targetMacs","target MACs from device",java.util.Map.of("targetMacs",targetMacs));
+            String mac = device.getMacAddress();
+            targetMacs = mac != null && !mac.isBlank() ? List.of(mac.trim().toUpperCase()) : List.of();
         } else {
             targetMacs = getUserDeviceMacs(userId);
-            dbg("H-BE-1","SessionService.getLiveSession:allMacs","all user MACs (no filter)",java.util.Map.of("targetMacs",targetMacs));
         }
 
         if (targetMacs.isEmpty()) {
-            dbg("H-BE-1","SessionService.getLiveSession:emptyMacs","targetMacs is empty, returning null",java.util.Map.of());
             return null;
         }
 
         Instant now = Instant.now();
 
-        // Lay 1 ban ghi moi nhat thuoc user devices
-        Query latestQuery = new Query(
-                Criteria.where("mac_address").in(targetMacs)
-        ).with(Sort.by(Sort.Direction.DESC, "timestamp")).limit(1);
-        dbg("H-BE-1","SessionService.getLiveSession:latestQuery","querying final_result for latest record",java.util.Map.of("macs",targetMacs,"sortField","timestamp DESC"));
+        // Tim ban ghi moi nhat: MAC filter + sort DESC + limit 1 + projection
+        Query latestQuery = projection(
+                new Query(
+                        Criteria.where("mac_address").in(targetMacs)
+                ).with(Sort.by(Sort.Direction.DESC, "timestamp"))
+                        .limit(1),
+                SESSION_PROJECTION_FIELDS);
         Document latestDoc = mongoTemplate.findOne(latestQuery, Document.class, "final_result");
-        dbg("H-BE-1","SessionService.getLiveSession:latestResult","latest record result",java.util.Map.of("found",latestDoc!=null,"mac",latestDoc!=null?latestDoc.getString("mac_address"):"null","ts",latestDoc!=null?latestDoc.get("timestamp"):"null"));
 
         if (latestDoc == null) {
-            dbg("H-BE-1","SessionService.getLiveSession:latestNull","no latest doc found, returning null",java.util.Map.of());
             return null;
         }
 
         Instant latestTs = parseTimestamp(latestDoc.get("timestamp"));
-        dbg("H-BE-1","SessionService.getLiveSession:parsedTs","parsed timestamp",java.util.Map.of("latestTs",latestTs,"now",now,"diffMs",Math.abs(now.toEpochMilli()-latestTs.toEpochMilli()),"SESSION_GAP_MS",SESSION_GAP_MS));
 
-        // Xac dinh session active: (now - latestTs) < 1 phut
+        // Xac dinh session active: (now - latestTs) < 5 phut
         boolean isActive = Math.abs(now.toEpochMilli() - latestTs.toEpochMilli()) < SESSION_GAP_MS;
-        dbg("H-BE-1","SessionService.getLiveSession:isActive","isActive check",java.util.Map.of("isActive",isActive,"diffMs",Math.abs(now.toEpochMilli()-latestTs.toEpochMilli()),"threshold",SESSION_GAP_MS));
 
         if (!isActive) {
-            dbg("H-BE-1","SessionService.getLiveSession:notActive","session not active, returning null",java.util.Map.of());
             return null;
         }
 
-        // Lay ALL records cua session active thuoc user devices
+        // Lay records trong cua so 5 phut: filter MAC + timestamp range + sort ASC + projection
         Instant sessionStart = latestTs.minus(SESSION_GAP_MS, ChronoUnit.MILLIS);
-        Query recordsQuery = new Query(
-                Criteria.where("timestamp").gte(sessionStart)
-                        .and("mac_address").in(targetMacs)
-        ).with(Sort.by(Sort.Direction.ASC, "timestamp"));
+
+        // Chuyen Instant -> LocalDateTime VN -> string format de query dung kieu voi MongoDB
+        LocalDateTime sessionStartVn = LocalDateTime.ofInstant(sessionStart, VN_ZONE);
+        String sessionStartStr = sessionStartVn.format(TS_PARSE_FMT);
+
+        Query recordsQuery = projection(
+                new Query(
+                        Criteria.where("timestamp").gte(sessionStartStr)
+                                .and("mac_address").in(targetMacs)
+                ).with(Sort.by(Sort.Direction.ASC, "timestamp")),
+                SESSION_PROJECTION_FIELDS);
 
         List<Document> docs = mongoTemplate.find(recordsQuery, Document.class, "final_result");
 
@@ -340,7 +343,7 @@ public class SessionService {
      */
     public SessionDto getSessionById(String sessionId) {
         Query query = new Query(
-                new org.springframework.data.mongodb.core.query.Criteria("session_id").is(sessionId)
+                new Criteria("session_id").is(sessionId)
         );
         SessionEntity entity = mongoTemplate.findOne(query, SessionEntity.class, "sessions");
         if (entity == null) {
@@ -359,14 +362,13 @@ public class SessionService {
         }
 
         Query query = new Query(
-                new org.springframework.data.mongodb.core.query.Criteria("session_id").is(sessionId)
+                new Criteria("session_id").is(sessionId)
         );
         SessionEntity entity = mongoTemplate.findOne(query, SessionEntity.class, "sessions");
         if (entity == null) {
             return null;
         }
 
-        // Lay ban ghi chi thuoc user devices
         List<Document> relatedDocs = findSessionRecords(entity, userMacs);
         if (relatedDocs.isEmpty()) {
             return null;
@@ -378,6 +380,18 @@ public class SessionService {
         return dto;
     }
 
+    /** Fields needed by rebuildSessions: grouping + computeAvg + deriveSessionId */
+    private static final String[] REBUILD_PROJECTION_FIELDS = {
+            "_id", "timestamp", "mac_address",
+            "bpm", "spo2", "body_temp", "gsr_adc", "label",
+            "device_id", "ingested_at"
+    };
+    private static Query projection(Query q, String... fields) {
+        q.fields().include("_id");
+        for (String f : fields) { q.fields().include(f); }
+        return q;
+    }
+
     // ================================================================
     // Session Rebuild (goi tu Scheduler)
     // ================================================================
@@ -385,38 +399,31 @@ public class SessionService {
     /**
      * Quet toan bo final_result, phat hien phiên moi / cap nhat phiên active,
      * LUU ket qua vao bang sessions.
-     *
-     * Chay moi 30 giay (tu SessionScheduler).
-     *
-     * Strategy: Xoa toan bo sessions cu, tao lai tu dau.
-     * Vi moi detectSessions() tao UUID ngau nhien, nen khong the
-     * match sessions cu vs moi -> chi can insert all.
      */
     public void rebuildSessions() {
         log.info("[SessionService] Starting session rebuild...");
 
-        // 1. Doc ALL records tu final_result, sort ASC theo timestamp (thoi gian ESP32 do)
-        Query query = new Query().with(Sort.by(Sort.Direction.ASC, "timestamp"));
+        // Projection: chi lay 10 fields can thiet thay vi 25 fields
+        Query query = projection(
+                new Query()
+                        .with(Sort.by(Sort.Direction.ASC, "timestamp")),
+                REBUILD_PROJECTION_FIELDS);
         List<Document> docs = mongoTemplate.find(query, Document.class, "final_result");
 
         if (docs.isEmpty()) {
             log.info("[SessionService] final_result is empty, no sessions to build.");
-            // Xoa sessions cu neu final_result trong
             mongoTemplate.remove(new Query(), SessionEntity.class, "sessions");
             return;
         }
 
-        // 2. Phat hien phiên bang cach gap > 1 phut
         List<SessionGroup> groups = detectSessions(docs);
         log.info("[SessionService] Detected {} sessions from {} records.", groups.size(), docs.size());
 
         Instant now = Instant.now();
 
-        // 3. Xoa toan bo sessions cu
         mongoTemplate.remove(new Query(), SessionEntity.class, "sessions");
         log.info("[SessionService] Cleared old sessions.");
 
-        // 4. Insert all new sessions
         for (SessionGroup group : groups) {
             Instant lastRecordTime = group.endTime;
             boolean isActive = Math.abs(now.toEpochMilli() - lastRecordTime.toEpochMilli()) < SESSION_GAP_MS;
@@ -435,8 +442,7 @@ public class SessionService {
 
     /**
      * Phat hien cac phiên tu danh sach documents.
-     * Gap > 1 phut giua 2 ban ghi lien tiep (theo timestamp) → phiên mới.
-     * Session ID cố định: hash MD5(first_record_timestamp + first_record_device_id).
+     * Gap > 5 phut giua 2 ban ghi lien tiep → phiên mới.
      */
     private List<SessionGroup> detectSessions(List<Document> docs) {
         List<SessionGroup> groups = new ArrayList<>();
@@ -448,7 +454,6 @@ public class SessionService {
             if (current == null) {
                 current = new SessionGroup(deriveSessionId(doc), ts);
             } else if (Math.abs(ts.toEpochMilli() - current.endTime.toEpochMilli()) > SESSION_GAP_MS) {
-                // Gap > 1 phut → kết thúc phiên hiện tại, bắt đầu phiên mới
                 groups.add(current);
                 current = new SessionGroup(deriveSessionId(doc), ts);
             }
@@ -465,7 +470,6 @@ public class SessionService {
 
     /**
      * Tao session ID cố định từ data thực tế của bản ghi đầu tiên trong phiên.
-     * Không dùng UUID.randomUUID() vì sẽ tạo ID mới mỗi lần rebuild → frontend 404.
      */
     private String deriveSessionId(Document firstRecord) {
         String ts = firstRecord.getString("timestamp");
@@ -484,21 +488,17 @@ public class SessionService {
      */
     private Instant parseTimestamp(Object value) {
         if (value == null) {
-            return parseIngestedAt(null); // fallback
+            return parseIngestedAt(null);
         }
-        // Unix milliseconds
         if (value instanceof Number n) {
             return Instant.ofEpochMilli(n.longValue());
         }
-        // String parse
         try {
             String s = value.toString().trim();
-            // ESP32 format: "yyyy:MM:dd - HH:mm:ss"
             try {
                 LocalDateTime ldt = LocalDateTime.parse(s, TS_PARSE_FMT);
                 return ldt.toInstant(VN_ZONE);
             } catch (Exception e) {
-                // Unix ms string
                 return Instant.ofEpochMilli(Long.parseLong(s));
             }
         } catch (Exception e) {
@@ -507,7 +507,6 @@ public class SessionService {
         }
     }
 
-    /** Parse ingested_at (java.util.Date / Instant / LocalDateTime / String) — chỉ dùng khi timestamp null */
     private Instant parseIngestedAt(Object value) {
         if (value == null) return Instant.now();
         if (value instanceof java.util.Date date) return date.toInstant();
@@ -516,8 +515,6 @@ public class SessionService {
         try {
             return Instant.parse(value.toString());
         } catch (Exception e) {
-            // Fallback: thử parse string timestamp "yyyy:MM:dd - HH:mm:ss"
-            // Đây là ESP32 format — parse as UTC+7
             try {
                 LocalDateTime ldt = LocalDateTime.parse(value.toString(), TS_PARSE_FMT);
                 return ldt.toInstant(VN_ZONE);
@@ -530,7 +527,7 @@ public class SessionService {
 
     private SessionEntity findBySessionId(String sessionId) {
         return mongoTemplate.findOne(
-                new Query(new org.springframework.data.mongodb.core.query.Criteria("session_id").is(sessionId)),
+                new Query(new Criteria("session_id").is(sessionId)),
                 SessionEntity.class, "sessions"
         );
     }
@@ -564,7 +561,6 @@ public class SessionService {
     }
 
     private boolean needsUpdate(SessionEntity existing, SessionGroup group) {
-        // Cap nhat neu so ban ghi thay doi hoac endTime thay doi
         return existing.getRecordCount() != group.records.size()
                 || !existing.getEndTime().equals(group.endTime);
     }
@@ -581,7 +577,7 @@ public class SessionService {
         dto.setAvgBodyTemp(entity.getAvgBodyTemp());
         dto.setAvgGsrAdc(entity.getAvgGsrAdc());
         dto.setActive(entity.isActive());
-        dto.setRecords(null); // chi metadata, khong ke records
+        dto.setRecords(null);
         return dto;
     }
 
@@ -589,37 +585,28 @@ public class SessionService {
         return toDtoWithRecords(entity, List.of());
     }
 
-    /**
-     * Tra ve chi tiet 1 phiên (kem danh sach records) chi thuoc user devices.
-     */
     private SessionDto toDtoWithRecords(SessionEntity entity, List<String> userMacs) {
         SessionDto dto = toDto(entity);
 
-        // Query final_result bang trường timestamp (String "yyyy:MM:dd - HH:mm:ss").
-        // timestamp là UTC+7, format này sort lexicographically = chronological order.
-        // Dùng [firstTs, lastTs] để bao trùm toàn bộ phiên.
         Instant startUtc = entity.getStartTime();
         Instant endUtc = entity.getEndTime();
 
-        // Chuyển UTC → UTC+7 để khớp với ESP32 timestamp
         LocalDateTime startVn = LocalDateTime.ofInstant(startUtc, VN_ZONE);
         LocalDateTime endVn = LocalDateTime.ofInstant(endUtc, VN_ZONE);
 
         String startTsStr = startVn.format(TS_PARSE_FMT);
         String endTsStr = endVn.format(TS_PARSE_FMT);
 
-        // Loc theo MAC neu co userMacs
-        org.springframework.data.mongodb.core.query.Criteria timeCriteria =
-                new org.springframework.data.mongodb.core.query.Criteria("timestamp")
-                        .gte(startTsStr)
-                        .lte(endTsStr);
+        Criteria timeCriteria = new Criteria("timestamp").gte(startTsStr).lte(endTsStr);
 
         if (!userMacs.isEmpty()) {
             timeCriteria = timeCriteria.and("mac_address").in(userMacs);
         }
 
-        Query query = new Query(timeCriteria)
-                .with(Sort.by(Sort.Direction.ASC, "timestamp"));
+        Query query = projection(
+                new Query(timeCriteria)
+                        .with(Sort.by(Sort.Direction.ASC, "timestamp")),
+                SESSION_PROJECTION_FIELDS);
 
         List<Document> docs = mongoTemplate.find(query, Document.class, "final_result");
 
@@ -644,11 +631,10 @@ public class SessionService {
         record.setConfidence(toDouble(doc.get("confidence")));
         record.setIngestedAt(parseIngestedAt(doc.get("ingested_at")));
         record.setMacAddress(doc.getString("mac_address"));
-        // timestamp: try raw string field first, fallback to ingestedAt
+
         String tsStr = doc.getString("timestamp");
         if (tsStr != null && !tsStr.isBlank()) {
             try {
-                // ESP32 gửi giờ UTC+7 → parse rồi gắn offset +7 để ra UTC
                 LocalDateTime ldt = LocalDateTime.parse(tsStr, TS_PARSE_FMT);
                 record.setTimestamp(ldt.toInstant(VN_ZONE));
             } catch (Exception e) {
@@ -671,9 +657,124 @@ public class SessionService {
         }
     }
 
+    private Map<String, String> buildMacToNameMap() {
+        Query query = new Query();
+        List<DeviceEntity> devices = mongoTemplate.find(query, DeviceEntity.class, "devices");
+        Map<String, String> map = new HashMap<>();
+        for (DeviceEntity d : devices) {
+            if (d.getMacAddress() != null && d.getName() != null) {
+                map.put(d.getMacAddress().trim().toUpperCase(), d.getName());
+            }
+        }
+        return map;
+    }
+
+    private String findDeviceIdByMac(List<String> userMacs, String mac) {
+        String upperMac = mac != null ? mac.toUpperCase() : null;
+        Query query = new Query(Criteria.where("mac_address").is(upperMac));
+        DeviceEntity device = mongoTemplate.findOne(query, DeviceEntity.class, "devices");
+        return device != null ? device.getId() : null;
+    }
+
     // ================================================================
-    // Inner class: Nhom ban ghi theo phiên
+    // Stress/Fever records from final_result (paginated) — for AlertsPage
     // ================================================================
+
+    private static final String[] RECORD_FIELDS = {
+            "_id", "timestamp", "ingested_at", "mac_address",
+            "bpm", "spo2", "body_temp", "gsr_adc",
+            "room_temp", "humidity", "label", "confidence"
+    };
+
+    /**
+     * Tra ve cac ban ghi Stress/Fever tu final_result, phan trang.
+     * Chi tra ve ban ghi thuoc device cua user.
+     *
+     * @param userId    ID nguoi dung
+     * @param deviceId  Optional — neu co thi chi lay MAC cua device do
+     * @param page      So trang (0-based)
+     * @param size      Kich thuoc trang (default 20)
+     * @param hours     Gio de quyet (default 8760 = 1 nam)
+     */
+    public FeverStressRecordDto getFeverStressRecords(String userId, String deviceId, int page, int size, int hours) {
+        List<String> targetMacs;
+
+        if (deviceId != null && !deviceId.isBlank()) {
+            DeviceEntity device = mongoTemplate.findOne(
+                    new Query(new Criteria("_id").is(new ObjectId(deviceId))),
+                    DeviceEntity.class, "devices");
+            if (device == null || !userId.equals(device.getUserId())) {
+                return emptyPage(page, size);
+            }
+            String mac = device.getMacAddress();
+            targetMacs = mac != null && !mac.isBlank() ? List.of(mac.trim().toUpperCase()) : List.of();
+        } else {
+            targetMacs = getUserDeviceMacs(userId);
+        }
+
+        if (targetMacs.isEmpty()) {
+            return emptyPage(page, size);
+        }
+
+        Instant since = Instant.now().minus(hours, ChronoUnit.HOURS);
+        LocalDateTime sinceVn = LocalDateTime.ofInstant(since, VN_ZONE);
+        String sinceStr = sinceVn.format(TS_PARSE_FMT);
+
+        // Dem tong so ban ghi
+        Query countQuery = new Query(
+                Criteria.where("timestamp").gte(sinceStr)
+                        .and("mac_address").in(targetMacs)
+                        .and("label").in("Stress", "Fever")
+        );
+        long total = mongoTemplate.count(countQuery, Document.class, "final_result");
+
+        if (total == 0) {
+            return emptyPage(page, size);
+        }
+
+        int totalPages = (int) Math.ceil((double) total / size);
+        int skip = page * size;
+
+        Query query = new Query(
+                Criteria.where("timestamp").gte(sinceStr)
+                        .and("mac_address").in(targetMacs)
+                        .and("label").in("Stress", "Fever")
+        ).with(Sort.by(Sort.Direction.DESC, "timestamp"))
+                .skip(skip)
+                .limit(size);
+
+        Query projected = projection(query, RECORD_FIELDS);
+        List<Document> docs = mongoTemplate.find(projected, Document.class, "final_result");
+
+        List<SessionDto.HealthRecordDto> records = docs.stream()
+                .map(this::docToRecord)
+                .toList();
+
+        // Fallback: set composite id when _id is missing (projection stripped it)
+        for (int i = 0; i < records.size(); i++) {
+            SessionDto.HealthRecordDto rec = records.get(i);
+            if (rec.getId() == null) {
+                rec.setId(docs.get(i).getString("timestamp") + "|" +
+                           docs.get(i).getString("mac_address") + "|" +
+                           docs.get(i).getString("label"));
+            }
+        }
+
+        FeverStressRecordDto dto = new FeverStressRecordDto();
+        dto.setTotalCount(total);
+        dto.setPage(page);
+        dto.setSize(size);
+        dto.setTotalPages(totalPages);
+        dto.setRecords(records);
+
+        return dto;
+    }
+
+    private FeverStressRecordDto emptyPage(int page, int size) {
+        int totalPages = 0;
+        return new FeverStressRecordDto(List.of(), 0, page, size, 0);
+    }
+
     private static class SessionGroup {
         final String sessionId;
         final Instant startTime;
@@ -694,22 +795,16 @@ public class SessionService {
             }
         }
 
-        /**
-         * Parse trường timestamp (ESP32 device time).
-         * Supports: Number (Unix ms), String (Unix ms or "yyyy:MM:dd - HH:mm:ss").
-         */
         Instant parseInstant(Object value) {
             if (value == null) return Instant.now();
             if (value instanceof Number n) {
                 return Instant.ofEpochMilli(n.longValue());
             }
             String s = value.toString().trim();
-            // ESP32 format "yyyy:MM:dd - HH:mm:ss" → parse as UTC+7
             try {
-                LocalDateTime ldt = LocalDateTime.parse(s, TS_PARSE_FMT);
-                return ldt.toInstant(VN_ZONE);
+                LocalDateTime ldt = LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy:MM:dd - HH:mm:ss"));
+                return ldt.toInstant(ZoneOffset.ofHours(7));
             } catch (Exception e) {
-                // Fallback: Unix ms string
                 try {
                     return Instant.ofEpochMilli(Long.parseLong(s));
                 } catch (Exception ex) {

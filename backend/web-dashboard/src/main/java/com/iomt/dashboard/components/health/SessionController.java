@@ -79,16 +79,18 @@ public class SessionController {
     }
 
     // ================================================================
-    // GET /api/health/sessions/history?hours=168
+    // GET /api/health/sessions/history?hours=168&deviceId=xxx
     //    Tra ve sessions trong khoang N gio (default 168 = 7 ngay).
+    //    Neu co deviceId — chi tra ve sessions cua thiet bi do.
     // ================================================================
     @GetMapping("/history")
     public ResponseEntity<List<SessionDto>> getSessionsInRange(
             @RequestParam(defaultValue = "168") int hours,
+            @RequestParam(required = false) String deviceId,
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
 
         String uid = UserUtils.extractUserId(userId);
-        List<SessionDto> sessions = sessionService.getSessionsInRange(hours, uid);
+        List<SessionDto> sessions = sessionService.getSessionsInRange(hours, uid, deviceId);
         return ResponseEntity.ok(sessions);
     }
 
@@ -101,12 +103,35 @@ public class SessionController {
     public ResponseEntity<SessionDto> getLiveSession(
             @RequestHeader(value = "X-User-Id", required = false) String userId,
             @RequestParam(required = false) String deviceId) {
-
         String uid = UserUtils.extractUserId(userId);
         SessionDto session = sessionService.getLiveSession(uid, deviceId);
         if (session == null) {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.ok(session);
+    }
+
+    // ================================================================
+    // GET /api/health/sessions/fever-stress-records
+    //    Tra ve cac ban ghi Stress/Fever tu final_result, phan trang.
+    //    Dung cho AlertsPage — hien thi tat ca cac thoi diem co trang thai bat thuong.
+    //
+    //    Params:
+    //       deviceId  — loc theo thiet bi (optional)
+    //       page      — so trang, 0-based (default 0)
+    //       size      — so ban ghi/trang (default 20)
+    //       hours     — khoang thoi gian lookback (default 8760 = 1 nam)
+    // ================================================================
+    @GetMapping("/fever-stress-records")
+    public ResponseEntity<FeverStressRecordDto> getFeverStressRecords(
+            @RequestHeader(value = "X-User-Id", required = false) String userId,
+            @RequestParam(required = false) String deviceId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "8760") int hours) {
+
+        String uid = UserUtils.extractUserId(userId);
+        FeverStressRecordDto result = sessionService.getFeverStressRecords(uid, deviceId, page, size, hours);
+        return ResponseEntity.ok(result);
     }
 }

@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,11 +22,12 @@ import java.util.Optional;
  * Auth:      Public (tạm thời — sẽ thêm JWT sau)
  *
  * CRUD đầy đủ:
- *   POST   /diary-notes           — Tạo ghi chú
- *   GET    /diary-notes           — Danh sách (mới nhất trước)
- *   GET    /diary-notes/{id}      — Chi tiết 1 ghi chú
- *   PUT    /diary-notes/{id}      — Sửa ghi chú
- *   DELETE /diary-notes/{id}      — Xóa ghi chú
+ *   POST   /diary-notes                  — Tạo ghi chú
+ *   GET    /diary-notes                  — Danh sách (mới nhất trước)
+ *   GET    /diary-notes/{id}             — Chi tiết 1 ghi chú
+ *   PUT    /diary-notes/{id}             — Sửa ghi chú
+ *   DELETE /diary-notes/{id}             — Xóa ghi chú
+ *   GET    /diary-notes/by-time-range    — Lấy ghi chú theo khoảng thời gian
  */
 @RestController
 @RequestMapping("/api/diary-notes")
@@ -109,6 +111,35 @@ public class DiaryController {
     }
 
     /**
+     * GET /api/diary-notes/by-time-range
+     * Lấy danh sách ghi chú trong khoảng thời gian (để overlay lên biểu đồ).
+     * Params: from (epoch ms), to (epoch ms)
+     */
+    @GetMapping("/by-time-range")
+    public ResponseEntity<List<DiaryDto>> getByTimeRange(
+            @RequestParam long from,
+            @RequestParam long to,
+            @RequestHeader(value = "X-User-Id", required = false) String userId) {
+
+        String uid = UserUtils.extractUserId(userId);
+
+        Instant fromInstant = Instant.ofEpochMilli(from);
+        Instant toInstant = Instant.ofEpochMilli(to);
+
+        Query query = new Query(
+                Criteria.where("user_id").is(uid)
+                        .and("note_timestamp").gte(fromInstant).lte(toInstant)
+        ).with(Sort.by(Sort.Direction.ASC, "note_timestamp"));
+
+        List<DiaryDto> notes = mongoTemplate.find(query, DiaryNote.class)
+                .stream()
+                .map(DiaryDto::fromEntity)
+                .toList();
+
+        return ResponseEntity.ok(notes);
+    }
+
+    /**
      * PUT /api/diary-notes/{id}
      * Sửa ghi chú (chỉ cập nhật trường khác null).
      */
@@ -127,6 +158,18 @@ public class DiaryController {
                     }
                     if (dto.getContent() != null) {
                         note.setContent(dto.getContent());
+                    }
+                    if (dto.getNoteTimestamp() != null) {
+                        note.setNoteTimestamp(dto.getNoteTimestamp());
+                    }
+                    if (dto.getAlertId() != null) {
+                        note.setAlertId(dto.getAlertId());
+                    }
+                    if (dto.getActivity() != null) {
+                        note.setActivity(dto.getActivity());
+                    }
+                    if (dto.getMood() != null) {
+                        note.setMood(dto.getMood());
                     }
                     DiaryNote saved = mongoTemplate.save(note);
                     return ResponseEntity.ok(DiaryDto.fromEntity(saved));

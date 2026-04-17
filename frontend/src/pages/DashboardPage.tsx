@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Activity, Droplet, Thermometer, RefreshCw, WifiOff, Clock, Cpu, ChevronDown } from 'lucide-react';
+import { Activity, Droplet, Thermometer, RefreshCw, WifiOff, Clock, Cpu, ChevronDown, AlertTriangle, X } from 'lucide-react';
 import SessionChart from '../components/SessionChart';
-import { getLiveSession, getEnvironment, getDevices } from '../services/api';
+import { getLiveSession, getEnvironment, getDevices, getUnreadAlerts, markAlertRead } from '../services/api';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
@@ -21,6 +21,8 @@ export default function DashboardPage() {
   const [devices, setDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState(() => localStorage.getItem(STORAGE_KEY_SELECTED_DEVICE) || '');
   const userId = localStorage.getItem('backendUserId');
+  const [alerts, setAlerts] = useState([]);
+  const [alertDismissed, setAlertDismissed] = useState(false);
 
   // Check if user has registered devices
   useEffect(() => {
@@ -49,9 +51,6 @@ export default function DashboardPage() {
   }, [userId]);
 
   // Poll live session every 1 second (direct final_result query, no rebuild dependency)
-  // #region DEBUG: instrument getLiveSession call
-  fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession',message:'FE: getLiveSession called',data:{userId,selectedDeviceId,hasDevices},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   const fetchSession = useCallback(async () => {
     if (!userId || hasDevices === false) {
       setLoading(false);
@@ -59,18 +58,9 @@ export default function DashboardPage() {
     }
     try {
       setError(null);
-      // #region DEBUG: before API call
-      fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession:api',message:'FE: calling getLiveSession API',data:{userId,selectedDeviceId,hasDevices},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const res = await getLiveSession(userId, selectedDeviceId || null);
-      // #region DEBUG: API response
-      fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession:response',message:'FE: API response received',data:{status:res.status,hasData:!!(res.status === 200 && res.data),recordCount:res.data?.records?.length||0,sessionActive:res.data?.active,label:res.data?.label},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setSession(res.status === 204 ? null : res.data);
     } catch (err) {
-      // #region DEBUG: API error
-      fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:fetchSession:error',message:'FE: API error',data:{status:err.response?.status,message:err.message},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       console.error('Failed to load session:', err);
       setError(err.response?.data?.message || err.message || 'Failed to load session');
     } finally {
@@ -90,21 +80,41 @@ export default function DashboardPage() {
     }
   };
 
+  // Poll alerts every 5 seconds
+  const fetchAlerts = useCallback(async () => {
+    if (!userId || alertDismissed) return;
+    try {
+      const res = await getUnreadAlerts(userId);
+      setAlerts(res.data || []);
+    } catch (err) {
+      console.error('Failed to load alerts:', err);
+    }
+  }, [userId, alertDismissed]);
+
+  const dismissAlert = async (alertId) => {
+    try {
+      await markAlertRead(userId, alertId);
+      setAlerts(prev => prev.filter(a => a.id !== alertId));
+      if (alerts.length <= 1) setAlertDismissed(true);
+    } catch (err) {
+      console.error('Failed to dismiss alert:', err);
+    }
+  };
+
   useEffect(() => {
     if (hasDevices === false) return;
     fetchSession();
     fetchEnv();
+    fetchAlerts();
     // Poll every 1 second using /live endpoint (direct final_result query)
     const sessionInterval = setInterval(fetchSession, 1000);
     const envInterval = setInterval(fetchEnv, 1000);
-    return () => { clearInterval(sessionInterval); clearInterval(envInterval); };
+    const alertInterval = setInterval(fetchAlerts, 5000);
+    return () => { clearInterval(sessionInterval); clearInterval(envInterval); clearInterval(alertInterval); };
   }, [hasDevices, userId, selectedDeviceId, fetchSession]);
 
   const handleDeviceChange = (e) => {
     const deviceId = e.target.value;
-    // #region DEBUG
-    fetch('http://127.0.0.1:7549/ingest/f96dcb14-73cd-4ded-90d6-a411ef5d7a1c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'05ef7e'},body:JSON.stringify({sessionId:'05ef7e',location:'DashboardPage.tsx:handleDeviceChange',message:'FE: user changed device selection',data:{deviceId,deviceName:devices.find(d=>d.id===deviceId)?.name,mac:devices.find(d=>d.id===deviceId)?.macAddress},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setSelectedDeviceId(deviceId);
     if (deviceId) {
       localStorage.setItem(STORAGE_KEY_SELECTED_DEVICE, deviceId);
@@ -116,7 +126,7 @@ export default function DashboardPage() {
 
   const records = session?.records || [];
   const latestRecord = records.length > 0 ? records[records.length - 1] : null;
-  const label = latestRecord?.label || session?.label || 'No Data';
+  const label = latestRecord?.label || session?.label || 'Khong co du lieu';
   const labelColor = labelColors[label] || '#6b7280';
   const hasData = !!latestRecord || records.length > 0;
 
@@ -137,13 +147,13 @@ export default function DashboardPage() {
       <div className="p-4 lg:p-6 max-w-3xl mx-auto text-center py-20">
         <Cpu size={48} className="mx-auto text-slate-300 mb-4" />
         <h2 className="text-xl font-semibold text-slate-700 mb-2">
-          Bạn chưa đăng ký thiết bị
+         Ban chua dang ky thiet bị
         </h2>
         <button
           onClick={() => navigate('/devices')}
           className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
         >
-          Thêm thiết bị
+          Them thiet bi
         </button>
       </div>
     );
@@ -155,11 +165,11 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl lg:text-2xl font-bold text-slate-800">Dashboard</h1>
+          <h1 className="text-xl lg:text-2xl font-bold text-slate-800">Trang chu</h1>
           <p className="text-slate-500 text-sm mt-0.5">
             {lastUpdated
-              ? `Cập nhật ${format(lastUpdated, 'HH:mm:ss')}`
-              : loading ? 'Đang tải...' : 'Chưa có dữ liệu'}
+              ? `Cap nhat ${format(lastUpdated, 'HH:mm:ss')}`
+              : loading ? 'Dang tai...' : 'Chua co du lieu'}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -221,7 +231,7 @@ export default function DashboardPage() {
             className="flex items-center gap-2 px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg hover:bg-slate-50"
           >
             <RefreshCw size={14} />
-            Refresh
+            Tai lai
           </button>
         </div>
       </div>
@@ -232,7 +242,7 @@ export default function DashboardPage() {
         style={{ backgroundColor: `${labelColor}15`, borderLeft: `4px solid ${labelColor}` }}
       >
         <div>
-          <p className="text-sm text-slate-600">Tình trạng sức khỏe</p>
+          <p className="text-sm text-slate-600">Tinh trang suc khoe</p>
           <p className="text-lg font-bold" style={{ color: labelColor }}>{label}</p>
         </div>
         <div className="flex items-center gap-6 text-right">
@@ -250,7 +260,7 @@ export default function DashboardPage() {
           )}
           {latestRecord?.bodyTemp != null && (
             <div>
-              <p className="text-xs text-slate-500">Nhiệt độ</p>
+              <p className="text-xs text-slate-500">Nhiet do</p>
               <p className="text-sm font-bold text-orange-500">{latestRecord.bodyTemp.toFixed(1)}°C</p>
             </div>
           )}
@@ -269,17 +279,55 @@ export default function DashboardPage() {
           <WifiOff size={20} className="text-red-500 mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-sm font-medium text-red-800">{error}</p>
-            <p className="text-xs text-red-600 mt-1">Đảm bảo backend đang chạy và MongoDB đã kết nối.</p>
+            <p className="text-xs text-red-600 mt-1">Kiem tra lai BE</p>
           </div>
         </div>
       )}
+
+      {/* Stress / Fever Alert Banner */}
+      {alerts.length > 0 && alerts.slice(0, 1).map(alert => (
+        <div
+          key={alert.id}
+          className="rounded-xl p-4 border-l-4 flex items-start justify-between gap-3"
+          style={{
+            backgroundColor: alert.label === 'Fever' ? '#fef2f2' : '#fffbeb',
+            borderColor: alert.label === 'Fever' ? '#ef4444' : '#f59e0b',
+          }}
+        >
+          <div className="flex items-start gap-3">
+            <AlertTriangle
+              size={20}
+              className="flex-shrink-0 mt-0.5"
+              style={{ color: alert.label === 'Fever' ? '#ef4444' : '#f59e0b' }}
+            />
+            <div>
+              <p className="text-sm font-semibold" style={{ color: alert.label === 'Fever' ? '#dc2626' : '#d97706' }}>
+                Cảnh báo {alert.label === 'Fever' ? 'Sốt' : 'Stress'}
+              </p>
+              <p className="text-sm text-slate-600 mt-0.5">{alert.message}</p>
+              {alert.timestamp && (
+                <p className="text-xs text-slate-400 mt-1">
+                  {format(new Date(alert.timestamp), 'HH:mm:ss')}
+                </p>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => dismissAlert(alert.id)}
+            className="flex-shrink-0 p-1 rounded hover:bg-black/5 transition-colors"
+            title="Đóng"
+          >
+            <X size={16} className="text-slate-400 hover:text-slate-600" />
+          </button>
+        </div>
+      ))}
 
       {/* No data placeholder */}
       {!hasData && !loading && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-12 text-center">
           <Activity size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-600 font-medium">Không có dữ liệu</p>
-          <p className="text-slate-400 text-sm mt-1">Khởi động ESP32 để bắt đầu phiên đo mới.</p>
+          <p className="text-slate-600 font-medium">Khong co du lieu</p>
+          <p className="text-slate-400 text-sm mt-1">Khoi dong ESP32 de bat dau phien do moi.</p>
         </div>
       )}
 
@@ -299,11 +347,11 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Environment (realtime 1s from datalake_raw) */}
           <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Môi trường</h3>
+            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Moi truong</h3>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-500 flex items-center gap-1.5">
-                  <Thermometer size={13} className="text-orange-400" /> Nhiệt độ phòng
+                  <Thermometer size={13} className="text-orange-400" /> Nhiet do phong
                 </span>
                 <span className="font-medium text-slate-700">
                   {envData.extTempC != null ? `${envData.extTempC.toFixed(1)} °C` : '--'}
@@ -311,7 +359,7 @@ export default function DashboardPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500 flex items-center gap-1.5">
-                  <Droplet size={13} className="text-blue-400" /> Độ ẩm
+                  <Droplet size={13} className="text-blue-400" /> Do am
                 </span>
                 <span className="font-medium text-slate-700">
                   {envData.extHumidityPct != null ? `${envData.extHumidityPct.toFixed(1)} %` : '--'}
@@ -322,14 +370,14 @@ export default function DashboardPage() {
 
           {/* Session Info */}
           <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Phiên đo</h3>
+            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Phien do</h3>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-500">Bắt đầu</span>
+                <span className="text-slate-500">Bat dau</span>
                 <span className="font-medium text-slate-700">{format(new Date(session.startTime), 'HH:mm:ss')}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Kết thúc</span>
+                <span className="text-slate-500">Ket thuc</span>
                 <span className="font-medium text-slate-700">{format(new Date(session.endTime), 'HH:mm:ss')}</span>
               </div>
             </div>
@@ -337,10 +385,10 @@ export default function DashboardPage() {
 
           {/* Session Stats */}
           <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Thống kê phiên</h3>
+            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Thong ke phien</h3>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-500">Điểm dữ liệu</span>
+                <span className="text-slate-500">Diem du lieu</span>
                 <span className="font-medium text-slate-700">{session.recordCount}</span>
               </div>
               {session.avgBpm != null && (
@@ -360,7 +408,7 @@ export default function DashboardPage() {
 
           {/* Raw Values */}
           <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
-            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Giá trị mới nhất</h3>
+            <h3 className="font-semibold text-slate-700 mb-3 text-sm">Gia tri moi nhat</h3>
             <div className="space-y-2 text-sm">
               {latestRecord?.confidence != null && (
                 <div className="flex justify-between">

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getSessionsHistory, getSessionById, getDevices } from '../services/api';
 import { format, startOfDay } from 'date-fns';
-import { Activity, WifiOff, Calendar, ChevronDown, ChevronUp, Clock, Cpu } from 'lucide-react';
+import { Activity, WifiOff, Calendar, ChevronDown, ChevronUp, Clock, Cpu, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import SessionChart from '../components/SessionChart';
 import { useNavigate } from 'react-router-dom';
@@ -25,10 +25,12 @@ export default function HistoryPage() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState(null);
   const [expandedSessions, setExpandedSessions] = useState(new Set());
-  const [hasDevices, setHasDevices] = useState(null); // null = checking, true/false = result
+  const [hasDevices, setHasDevices] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const userId = localStorage.getItem('backendUserId');
 
-  // Check if user has registered devices
+  // Check devices and fetch list
   useEffect(() => {
     const checkDevices = async () => {
       if (!userId) {
@@ -37,7 +39,9 @@ export default function HistoryPage() {
       }
       try {
         const res = await getDevices(userId);
-        setHasDevices((res.data || []).length > 0);
+        const deviceList = res.data || [];
+        setDevices(deviceList);
+        setHasDevices(deviceList.length > 0);
       } catch {
         setHasDevices(false);
       }
@@ -53,17 +57,19 @@ export default function HistoryPage() {
       }
       setLoading(true);
       setError(null);
+      setExpandedSessions(new Set());
+      setSessionDetail(null);
       try {
-        const res = await getSessionsHistory(range, userId);
+        const res = await getSessionsHistory(range, userId, selectedDeviceId);
         setSessions(res.data || []);
       } catch (err) {
         setError(err.response?.data?.message || err.message || 'Failed to load sessions');
-        toast.error('Failed to load health history');
+        toast.error('Tai lich su suc khoe that bai');
       }
       setLoading(false);
     };
     fetchSessions();
-  }, [range, userId, hasDevices]);
+  }, [range, userId, hasDevices, selectedDeviceId]);
 
   const toggleSession = async (sessionId) => {
     const isCurrentlyExpanded = expandedSessions.has(sessionId);
@@ -85,7 +91,7 @@ export default function HistoryPage() {
           const res = await getSessionById(sessionId, userId);
           setSessionDetail(res.data);
         } catch (err) {
-          toast.error('Failed to load session details');
+          toast.error('Tai chi tiet phien do that bai');
         } finally {
           setLoadingDetail(false);
         }
@@ -135,13 +141,13 @@ export default function HistoryPage() {
       <div className="p-4 lg:p-6 max-w-3xl mx-auto text-center py-20">
         <Cpu size={48} className="mx-auto text-slate-300 mb-4" />
         <h2 className="text-xl font-semibold text-slate-700 mb-2">
-          Bạn chưa đăng ký thiết bị
+          Ban chua dang ky thiet bibi
         </h2>
         <button
           onClick={() => navigate('/devices')}
           className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
         >
-          Thêm thiết bị
+          Them thiet bi
         </button>
       </div>
     );
@@ -151,14 +157,31 @@ export default function HistoryPage() {
     <div className="p-4 lg:p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl lg:text-2xl font-bold text-slate-800">Health History</h1>
+          <h1 className="text-xl lg:text-2xl font-bold text-slate-800">Lich su suc khoe</h1>
           <p className="text-slate-500 text-sm mt-0.5">
             {sessions.length > 0
-              ? `${sessions.length} phiên đo · ${sessions.reduce((a, s) => a + s.recordCount, 0)} bản ghi`
-              : 'Không có dữ liệu'}
+              ? `${sessions.length} phien do · ${sessions.reduce((a, s) => a + s.recordCount, 0)} ban ghi`
+              : 'Khong co du lieu'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-3">
+          {/* Device selector */}
+          <div className="flex items-center gap-2">
+            <Cpu size={14} className="text-slate-400" />
+            <select
+              value={selectedDeviceId || ''}
+              onChange={(e) => setSelectedDeviceId(e.target.value || null)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option value="">Tất cả thiết bị</option>
+              {devices.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name || d.macAddress}
+                </option>
+              ))}
+            </select>
+            <ChevronRight size={14} className="text-slate-300 -ml-1" />
+          </div>
           {RANGES.map((r) => (
             <button
               key={r.hours}
@@ -181,7 +204,7 @@ export default function HistoryPage() {
           <WifiOff size={20} className="text-red-500 mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-sm font-medium text-red-800">{error}</p>
-            <p className="text-xs text-red-600 mt-1">Đảm bảo backend đang chạy.</p>
+            <p className="text-xs text-red-600 mt-1">Dam bao backend dang chay.</p>
           </div>
         </div>
       )}
@@ -191,7 +214,7 @@ export default function HistoryPage() {
         <div className="mb-6 bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
             <Calendar size={16} className="text-slate-500" />
-            <h2 className="font-semibold text-slate-700">Phiên đo</h2>
+            <h2 className="font-semibold text-slate-700">Phien do</h2>
             <span className="text-xs text-slate-400 ml-1">({sessions.length})</span>
           </div>
 
@@ -204,7 +227,7 @@ export default function HistoryPage() {
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     {format(date, 'EEEE, dd/MM/yyyy')}
                   </span>
-                  <span className="text-xs text-slate-400 ml-1">({daySessions.length} phiên)</span>
+                  <span className="text-xs text-slate-400 ml-1">({daySessions.length} phien)</span>
                 </div>
 
                 {/* Sessions for this day */}
@@ -235,12 +258,18 @@ export default function HistoryPage() {
                           )}
                           {session.active && (
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600 flex-shrink-0">
-                              Đang đo
+                              Dang do
                             </span>
                           )}
                           <span className="text-xs text-slate-400 flex-shrink-0">
                             {session.recordCount} điểm
                           </span>
+                          {session.deviceName && (
+                            <span className="text-xs text-slate-400 flex-shrink-0 flex items-center gap-1">
+                              <Cpu size={10} />
+                              {session.deviceName}
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-4 flex-shrink-0">
@@ -263,7 +292,7 @@ export default function HistoryPage() {
                         <div className="px-5 pb-4">
                           {loadingDetail && currentDetail?.sessionId !== session.sessionId ? (
                             <div className="h-40 flex items-center justify-center text-slate-400 text-sm">
-                              Đang tải chi tiết...
+                              Dang tai chi tiet...
                             </div>
                           ) : currentDetail?.sessionId === session.sessionId ? (
                             <div className="space-y-3">
@@ -276,12 +305,12 @@ export default function HistoryPage() {
                                 <table className="w-full text-xs">
                                   <thead>
                                     <tr className="bg-slate-100 text-slate-500">
-                                      <th className="text-left px-3 py-2 font-medium">Thời gian</th>
+                                      <th className="text-left px-3 py-2 font-medium">Thoi gian</th>
                                       <th className="text-left px-3 py-2 font-medium">BPM</th>
                                       <th className="text-left px-3 py-2 font-medium">SpO2 %</th>
-                                      <th className="text-left px-3 py-2 font-medium">Nhiệt độ °C</th>
+                                      <th className="text-left px-3 py-2 font-medium">Nhiet do °C</th>
                                       <th className="text-left px-3 py-2 font-medium">GSR</th>
-                                      <th className="text-left px-3 py-2 font-medium">Nhãn</th>
+                                      <th className="text-left px-3 py-2 font-medium">Nhan</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-50">
@@ -327,7 +356,7 @@ export default function HistoryPage() {
                             </div>
                           ) : (
                             <div className="h-12 flex items-center justify-center text-slate-400 text-xs">
-                              Không có chi tiết
+                              Khong co chi tiet
                             </div>
                           )}
                         </div>
@@ -345,14 +374,14 @@ export default function HistoryPage() {
       {!loading && sessions.length === 0 && (
         <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-8 text-center">
           <Activity size={40} className="mx-auto text-slate-300 mb-3" />
-          <p className="text-slate-600 font-medium">Không có dữ liệu</p>
+          <p className="text-slate-600 font-medium">Khong co du lieu</p>
         </div>
       )}
 
       {/* Aggregated chart */}
       {sessions.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-5 mb-6">
-          <h2 className="font-semibold text-slate-700 mb-4">Xu hướng trung bình theo phiên</h2>
+          <h2 className="font-semibold text-slate-700 mb-4">Xu huong trung binh theo phien</h2>
           {loading ? (
             <div className="h-64 animate-pulse bg-slate-100 rounded-lg" />
           ) : (

@@ -78,7 +78,7 @@ public class HealthController {
         Query query = new Query(Criteria.where("user_id").is(userId));
         List<DeviceEntity> devices = mongoTemplate.find(query, DeviceEntity.class, DEVICES_COLL);
         return devices.stream()
-                .map(d -> d.getMacAddress() != null ? d.getMacAddress().toLowerCase() : null)
+                .map(d -> d.getMacAddress() != null ? d.getMacAddress().trim().toUpperCase() : null)
                 .filter(Objects::nonNull)
                 .toList();
     }

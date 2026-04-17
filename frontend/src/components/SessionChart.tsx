@@ -19,28 +19,28 @@ interface SessionChartProps {
 const SIGNAL_CONFIG = {
   BPM: {
     key: 'BPM',
-    label: 'Nhịp tim',
+    label: 'Nhip tim',
     unit: 'BPM',
     color: '#ef4444',
     domain: [40, 130] as [number, number],
   },
   SpO2: {
     key: 'SpO2',
-    label: 'Nồng độ oxy',
+    label: 'Nong do oxy',
     unit: '%',
     color: '#3b82f6',
     domain: [90, 102] as [number, number],
   },
   BodyTemp: {
     key: 'BodyTemp',
-    label: 'Nhiệt độ cơ thể',
+    label: 'Nhiet do co the',
     unit: '°C',
     color: '#f59e0b',
     domain: [35, 42] as [number, number],
   },
   GSR: {
     key: 'GSR',
-    label: 'Điện da',
+    label: 'Dien da',
     unit: '',
     color: '#10b981',
     domain: [0, 1200] as [number, number],
@@ -66,8 +66,8 @@ function SignalChart({
       BodyTemp: r.bodyTemp,
       GSR: r.gsrAdc,
     };
-    // Use ingestedAt (server time) for display — timestamp from ESP32 can be stale/wrong
-    const tsSource = r.ingestedAt ?? r.timestamp;
+    // ingestedAt = server time (preferred), timestamp = ESP32 device time (fallback)
+    const tsSource = r.ingestedAt ?? r.timestamp ?? Date.now();
     return {
       time: format(new Date(tsSource), 'HH:mm:ss'),
       [config.key]: valMap[signal],
@@ -94,7 +94,7 @@ function SignalChart({
           style={{ height: height - 50 }}
         >
           <Activity size={20} className="text-slate-300" />
-          Chưa có dữ liệu
+          Chua co du lieu
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={height - 50}>
