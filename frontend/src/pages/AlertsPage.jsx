@@ -345,7 +345,7 @@ export default function AlertsPage() {
                   </div>
                 </div>
 
-                <div>
+                {/* <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Ghi chu them</label>
                   <textarea
                     value={diaryForm.note}
@@ -354,7 +354,7 @@ export default function AlertsPage() {
                     rows={3}
                     className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
                   />
-                </div>
+                </div> */}
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">

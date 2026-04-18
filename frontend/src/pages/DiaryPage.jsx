@@ -133,7 +133,7 @@ export default function DiaryPage() {
 
                   {/* Activity & Mood */}
                   <div className="flex flex-wrap items-center gap-2 mt-2">
-                    {note.activity && (
+                    {/* {note.activity && (
                       <span className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded-full">
                         {note.activity}
                       </span>
@@ -142,7 +142,7 @@ export default function DiaryPage() {
                       <span className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full">
                         {note.mood}
                       </span>
-                    )}
+                    )} */}
                     {note.noteTimestamp && (
                       <span className="text-xs text-slate-400 flex items-center gap-1">
                         <Clock size={10} />
@@ -204,7 +204,7 @@ export default function DiaryPage() {
               </div>
 
               {/* Activity */}
-              <div>
+              {/* <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">
                   Hoat dong 
                 </label>
@@ -214,7 +214,7 @@ export default function DiaryPage() {
                   onChange={(e) => setForm({ ...form, activity: e.target.value })}
                   className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                 />
-              </div>
+              </div> */}
 
               {/* Mood chips */}
               <div>

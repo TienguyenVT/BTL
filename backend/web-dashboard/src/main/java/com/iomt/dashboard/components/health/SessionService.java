@@ -20,35 +20,20 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * Service: Phát hiện và quản lý phiên đo (Session).
- *
- * Luồng xử lý:
- * 1. Query final_result với filter MAC, sort theo timestamp
- * 2. Kiểm tra active: bản ghi mới nhất trong vòng 5 phút
- * 3. Lay toàn bộ records trong cửa sổ 5 phút, lọc theo MAC
- * 4. Tính avg, label (mode của predicted_label)
- */
 @Service
 @RequiredArgsConstructor
 public class SessionService {
 
     private static final Logger log = LoggerFactory.getLogger(SessionService.class);
 
-    /** Khoảng gap (ms): bản ghi mới nhất trong vòng 5 phút → session active */
     private static final long SESSION_GAP_MS = 5 * 60 * 1000L;
 
-    /** ESP32 gửi timestamp ở múi giờ Việt Nam UTC+7 */
     private static final ZoneOffset VN_ZONE = ZoneOffset.ofHours(7);
 
-    /** DateTimeFormatter parse chuoi "yyyy:MM:dd - HH:mm:ss" */
     private static final DateTimeFormatter TS_PARSE_FMT = DateTimeFormatter.ofPattern("yyyy:MM:dd - HH:mm:ss");
 
     private final MongoTemplate mongoTemplate;
 
-    /**
-     * Lay danh sach MAC cua thiet bi ma user da dang ky.
-     */
     private List<String> getUserDeviceMacs(String userId) {
         if (userId == null || userId.isBlank()) {
             return List.of();
@@ -64,14 +49,6 @@ public class SessionService {
                 .toList();
     }
 
-    // ================================================================
-    // Public API
-    // ================================================================
-
-    /**
-     * Tra ve danh sach TAT CA phiên đo, sap xep theo startTime DESC.
-     * Chi tra ve session ma co ban ghi thuoc device cua user.
-     */
     public List<SessionDto> getAllSessions(String userId) {
         List<String> userMacs = getUserDeviceMacs(userId);
         if (userMacs.isEmpty()) {
@@ -98,10 +75,6 @@ public class SessionService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Tra ve danh sach phiên trong khoang N gio gan day.
-     * Chi tra ve session co ban ghi thuoc device cua user.
-     */
     public List<SessionDto> getSessionsInRange(int hours, String userId, String deviceId) {
         List<String> resolvedMacs;
         String resolvedName = null;
@@ -147,10 +120,6 @@ public class SessionService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Tra ve PHIEN ACTIVE cuoi cung (dang theo doi, chua bi ngat).
-     * Chi tra ve session cua user devices.
-     */
     public SessionDto getLatestActiveSession(String userId) {
         List<String> userMacs = getUserDeviceMacs(userId);
         if (userMacs.isEmpty()) {
@@ -174,9 +143,6 @@ public class SessionService {
         return null;
     }
 
-    /**
-     * Lay cac ban ghi cua session chi thuoc user devices.
-     */
     private List<Document> findSessionRecords(SessionEntity entity, List<String> userMacs) {
         Instant startUtc = entity.getStartTime();
         Instant endUtc = entity.getEndTime();
@@ -195,18 +161,12 @@ public class SessionService {
         return mongoTemplate.find(query, Document.class, "final_result");
     }
 
-    /** Fields needed by getLiveSession (docToRecord + computeAvg) — avoid fetching all 25 fields */
     private static final String[] SESSION_PROJECTION_FIELDS = {
             "_id", "timestamp", "ingested_at", "mac_address",
             "bpm", "spo2", "body_temp", "gsr_adc",
             "room_temp", "humidity", "label", "confidence"
     };
 
-    /**
-     * Tra ve session active — query TRỰC TIẾP final_result mà không qua sessions collection.
-     * Chi tra ve session thuoc user devices.
-     * @param deviceId Optional — nếu có thì chỉ lọc theo MAC của device đó.
-     */
     public SessionDto getLiveSession(String userId, String deviceId) {
         List<String> targetMacs;
 
@@ -229,7 +189,6 @@ public class SessionService {
 
         Instant now = Instant.now();
 
-        // Tim ban ghi moi nhat: MAC filter + sort DESC + limit 1 + projection
         Query latestQuery = projection(
                 new Query(
                         Criteria.where("mac_address").in(targetMacs)
@@ -244,17 +203,14 @@ public class SessionService {
 
         Instant latestTs = parseTimestamp(latestDoc.get("timestamp"));
 
-        // Xac dinh session active: (now - latestTs) < 5 phut
         boolean isActive = Math.abs(now.toEpochMilli() - latestTs.toEpochMilli()) < SESSION_GAP_MS;
 
         if (!isActive) {
             return null;
         }
 
-        // Lay records trong cua so 5 phut: filter MAC + timestamp range + sort ASC + projection
         Instant sessionStart = latestTs.minus(SESSION_GAP_MS, ChronoUnit.MILLIS);
 
-        // Chuyen Instant -> LocalDateTime VN -> string format de query dung kieu voi MongoDB
         LocalDateTime sessionStartVn = LocalDateTime.ofInstant(sessionStart, VN_ZONE);
         String sessionStartStr = sessionStartVn.format(TS_PARSE_FMT);
 
@@ -271,11 +227,9 @@ public class SessionService {
             return null;
         }
 
-        // Xac dinh chinh xac start/end cua session
         Instant actualStart = parseTimestamp(docs.get(0).get("timestamp"));
         Instant actualEnd = parseTimestamp(docs.get(docs.size() - 1).get("timestamp"));
 
-        // Loc nhung record thuc su thuoc session
         List<Document> sessionDocs = new ArrayList<>();
         Instant currentSessionStart = actualStart;
         for (Document doc : docs) {
@@ -289,7 +243,6 @@ public class SessionService {
             }
         }
 
-        // Build SessionDto
         SessionDto dto = new SessionDto();
         dto.setSessionId("live-" + latestTs.toEpochMilli());
         dto.setStartTime(sessionDocs.isEmpty() ? actualStart : parseTimestamp(sessionDocs.get(0).get("timestamp")));
@@ -338,9 +291,6 @@ public class SessionService {
                 .orElse(null);
     }
 
-    /**
-     * Tra ve chi tiet 1 phiên (kem danh sach records).
-     */
     public SessionDto getSessionById(String sessionId) {
         Query query = new Query(
                 new Criteria("session_id").is(sessionId)
@@ -352,9 +302,6 @@ public class SessionService {
         return toDtoWithRecords(entity);
     }
 
-    /**
-     * Tra ve chi tiet 1 phiên (kem danh sach records) chi thuoc user devices.
-     */
     public SessionDto getSessionById(String sessionId, String userId) {
         List<String> userMacs = getUserDeviceMacs(userId);
         if (userMacs.isEmpty()) {
@@ -380,7 +327,6 @@ public class SessionService {
         return dto;
     }
 
-    /** Fields needed by rebuildSessions: grouping + computeAvg + deriveSessionId */
     private static final String[] REBUILD_PROJECTION_FIELDS = {
             "_id", "timestamp", "mac_address",
             "bpm", "spo2", "body_temp", "gsr_adc", "label",
@@ -392,18 +338,9 @@ public class SessionService {
         return q;
     }
 
-    // ================================================================
-    // Session Rebuild (goi tu Scheduler)
-    // ================================================================
-
-    /**
-     * Quet toan bo final_result, phat hien phiên moi / cap nhat phiên active,
-     * LUU ket qua vao bang sessions.
-     */
     public void rebuildSessions() {
         log.info("[SessionService] Starting session rebuild...");
 
-        // Projection: chi lay 10 fields can thiet thay vi 25 fields
         Query query = projection(
                 new Query()
                         .with(Sort.by(Sort.Direction.ASC, "timestamp")),
@@ -436,14 +373,6 @@ public class SessionService {
                 groups.stream().filter(g -> Math.abs(now.toEpochMilli() - g.endTime.toEpochMilli()) < SESSION_GAP_MS).count());
     }
 
-    // ================================================================
-    // Private helpers
-    // ================================================================
-
-    /**
-     * Phat hien cac phiên tu danh sach documents.
-     * Gap > 5 phut giua 2 ban ghi lien tiep → phiên mới.
-     */
     private List<SessionGroup> detectSessions(List<Document> docs) {
         List<SessionGroup> groups = new ArrayList<>();
         SessionGroup current = null;
@@ -468,9 +397,6 @@ public class SessionService {
         return groups;
     }
 
-    /**
-     * Tao session ID cố định từ data thực tế của bản ghi đầu tiên trong phiên.
-     */
     private String deriveSessionId(Document firstRecord) {
         String ts = firstRecord.getString("timestamp");
         if (ts == null) {
@@ -482,10 +408,6 @@ public class SessionService {
         return UUID.nameUUIDFromBytes(key.getBytes()).toString();
     }
 
-    /**
-     * Parse trường timestamp (thời gian ESP32 gửi, Unix ms hoặc string).
-     * Fallback sang ingested_at nếu timestamp null.
-     */
     private Instant parseTimestamp(Object value) {
         if (value == null) {
             return parseIngestedAt(null);
@@ -676,26 +598,12 @@ public class SessionService {
         return device != null ? device.getId() : null;
     }
 
-    // ================================================================
-    // Stress/Fever records from final_result (paginated) — for AlertsPage
-    // ================================================================
-
     private static final String[] RECORD_FIELDS = {
             "_id", "timestamp", "ingested_at", "mac_address",
             "bpm", "spo2", "body_temp", "gsr_adc",
             "room_temp", "humidity", "label", "confidence"
     };
 
-    /**
-     * Tra ve cac ban ghi Stress/Fever tu final_result, phan trang.
-     * Chi tra ve ban ghi thuoc device cua user.
-     *
-     * @param userId    ID nguoi dung
-     * @param deviceId  Optional — neu co thi chi lay MAC cua device do
-     * @param page      So trang (0-based)
-     * @param size      Kich thuoc trang (default 20)
-     * @param hours     Gio de quyet (default 8760 = 1 nam)
-     */
     public FeverStressRecordDto getFeverStressRecords(String userId, String deviceId, int page, int size, int hours) {
         List<String> targetMacs;
 
@@ -720,7 +628,6 @@ public class SessionService {
         LocalDateTime sinceVn = LocalDateTime.ofInstant(since, VN_ZONE);
         String sinceStr = sinceVn.format(TS_PARSE_FMT);
 
-        // Dem tong so ban ghi
         Query countQuery = new Query(
                 Criteria.where("timestamp").gte(sinceStr)
                         .and("mac_address").in(targetMacs)
@@ -750,7 +657,6 @@ public class SessionService {
                 .map(this::docToRecord)
                 .toList();
 
-        // Fallback: set composite id when _id is missing (projection stripped it)
         for (int i = 0; i < records.size(); i++) {
             SessionDto.HealthRecordDto rec = records.get(i);
             if (rec.getId() == null) {

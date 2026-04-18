@@ -7,17 +7,6 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
 
-/**
- * Entity: Thong tin sinh truc hoc cua nguoi dung.
- * Collection: "profiles"
- *
- * Cac truong:
- *    - userId   : ID nguoi dung (unique, dung lam _id de tranh duplicate)
- *    - age      : Tuoi (nullable)
- *    - height   : Chieu cao cm (nullable)
- *    - weight   : Can nang kg (nullable)
- *    - updatedAt: Thoi diem cap nhat gan nhat
- */
 @Data
 @Document(collection = "profiles")
 public class ProfileEntity {

@@ -2,51 +2,15 @@ package com.iomt.dashboard.components.diary;
 
 import java.time.Instant;
 
-/**
- * DTO gộp: Request (tạo/sửa) + Response.
- *
- * Request (tạo/sửa):
- *   - title         : bắt buộc, không trống
- *   - content       : bắt buộc, không trống
- *   - noteTimestamp  : mốc thời gian ghi chú đề cập (optional)
- *   - alertId       : ID alert liên kết (optional)
- *   - activity      : hoạt động tại thời điểm đó (optional)
- *   - mood          : tâm trạng (optional)
- *
- * Response:
- *   - id            : ObjectId (null khi tạo mới)
- *   - title         : tiêu đề
- *   - content       : nội dung
- *   - createdAt     : thời điểm tạo (null khi request)
- *   - noteTimestamp  : mốc thời gian
- *   - alertId       : ID alert liên kết
- *   - activity      : hoạt động
- *   - mood          : tâm trạng
- */
 public class DiaryDto {
 
-    /** ID ghi chú — chỉ có trong response, null khi tạo mới */
     private String id;
-
-    /** Tiêu đề ghi chú — bắt buộc khi tạo/sửa */
     private String title;
-
-    /** Nội dung chi tiết — bắt buộc khi tạo/sửa */
     private String content;
-
-    /** Thời điểm tạo — chỉ có trong response */
     private Instant createdAt;
-
-    /** Mốc thời gian mà ghi chú đề cập (để đối chiếu biểu đồ) */
     private Instant noteTimestamp;
-
-    /** ID alert đã trigger ghi chú (nullable) */
     private String alertId;
-
-    /** Hoạt động tại thời điểm đó */
     private String activity;
-
-    /** Tâm trạng */
     private String mood;
 
     public DiaryDto() {}
@@ -63,7 +27,6 @@ public class DiaryDto {
         this.mood = mood;
     }
 
-    // ── Getters ──────────────────────────────────────────
     public String getId() { return id; }
     public String getTitle() { return title; }
     public String getContent() { return content; }
@@ -73,7 +36,6 @@ public class DiaryDto {
     public String getActivity() { return activity; }
     public String getMood() { return mood; }
 
-    // ── Setters ──────────────────────────────────────────
     public void setId(String id) { this.id = id; }
     public void setTitle(String title) { this.title = title; }
     public void setContent(String content) { this.content = content; }
@@ -83,7 +45,6 @@ public class DiaryDto {
     public void setActivity(String activity) { this.activity = activity; }
     public void setMood(String mood) { this.mood = mood; }
 
-    // ── Builder ──────────────────────────────────────────
     public static Builder builder() { return new Builder(); }
 
     public static class Builder {
@@ -109,9 +70,6 @@ public class DiaryDto {
         }
     }
 
-    // ── Factory methods ──────────────────────────────────────────
-
-    /** Chuyển Entity → DTO (response) */
     public static DiaryDto fromEntity(DiaryNote note) {
         return DiaryDto.builder()
                 .id(note.getId())
@@ -125,7 +83,6 @@ public class DiaryDto {
                 .build();
     }
 
-    /** Tạo Entity từ DTO (request) — chưa có id, createdAt */
     public DiaryNote toEntity(String userId) {
         return DiaryNote.builder()
                 .userId(userId)

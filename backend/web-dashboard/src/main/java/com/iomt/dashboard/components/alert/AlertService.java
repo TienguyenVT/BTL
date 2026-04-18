@@ -20,18 +20,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
-/**
- * Service: Tao canh bao tu dong khi phat hien nhan Stress/Fever.
- *
- * Duoc goi sau khi SessionService.rebuildSessions() xong.
- * Kiem tra cac session moi duoc tao/gan nhat:
- *    - Neu label = "Stress" hoac "Fever"
- *    - Tim device tuong ung de lay userId, macAddress
- *    - Tao AlertEntity luu vao collection "alerts"
- *
- * Co che de-bounce: chi tao alert moi neu chua co alert cung loai
- * cho cung thiet bi trong vong 5 phut.
- */
 @Service
 @RequiredArgsConstructor
 public class AlertService {
@@ -45,18 +33,10 @@ public class AlertService {
     private static final ZoneOffset VN_ZONE = ZoneOffset.ofHours(7);
     private static final DateTimeFormatter TS_PARSE_FMT = DateTimeFormatter.ofPattern("yyyy:MM:dd - HH:mm:ss");
 
-    /** Thoi gian de-bounce giua 2 alert cung loai (ms) — 5 phut */
     private static final long DEBOUNCE_MS = 5 * 60 * 1000L;
 
     private final MongoTemplate mongoTemplate;
 
-    // ================================================================
-    // Entry point — goi tu SessionScheduler sau rebuildSessions()
-    // ================================================================
-
-    /**
-     * Kiem tra cac session moi/active, tao alert Stress/Fever neu can.
-     */
     public void checkAndCreateAlerts() {
         log.info("[AlertService] Checking sessions for Stress/Fever alerts...");
 
@@ -99,10 +79,6 @@ public class AlertService {
 
         log.info("[AlertService] Alert check complete. Created {} new alerts.", created);
     }
-
-    // ================================================================
-    // Private helpers
-    // ================================================================
 
     private List<SessionEntity> findRecentSessions(Instant since) {
         Query query = new Query(

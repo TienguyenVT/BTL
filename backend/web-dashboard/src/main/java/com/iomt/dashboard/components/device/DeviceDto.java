@@ -6,20 +6,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
-/**
- * DTO: Thong tin thiet bi.
- *
- * Request (tao moi):
- *    - macAddress : bat buoc
- *    - name       : tuy chon
- *
- * Response:
- *    - id         : ObjectId
- *    - macAddress : dia chi MAC
- *    - name       : ten thiet bi
- *    - createdAt  : thoi diem tao
- *    - message    : thong bao loi (neu co)
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

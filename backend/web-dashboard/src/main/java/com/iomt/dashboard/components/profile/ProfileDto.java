@@ -6,17 +6,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
-/**
- * DTO: Tra ve thong tin profile + BMI tinh dong.
- *
- * Response:
- *    - userId    : ID nguoi dung
- *    - age       : Tuoi
- *    - height    : Chieu cao (cm)
- *    - weight    : Can nang (kg)
- *    - bmi       : Chi so BMI (tinh dong)
- *    - updatedAt : Thoi diem cap nhat
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

@@ -15,20 +15,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * Controller + Service gộp: Sổ tay sức khỏe cá nhân.
- *
- * Base path: /api/diary-notes
- * Auth:      Public (tạm thời — sẽ thêm JWT sau)
- *
- * CRUD đầy đủ:
- *   POST   /diary-notes                  — Tạo ghi chú
- *   GET    /diary-notes                  — Danh sách (mới nhất trước)
- *   GET    /diary-notes/{id}             — Chi tiết 1 ghi chú
- *   PUT    /diary-notes/{id}             — Sửa ghi chú
- *   DELETE /diary-notes/{id}             — Xóa ghi chú
- *   GET    /diary-notes/by-time-range    — Lấy ghi chú theo khoảng thời gian
- */
 @RestController
 @RequestMapping("/api/diary-notes")
 @RequiredArgsConstructor
@@ -36,18 +22,12 @@ public class DiaryController {
 
     private final MongoTemplate mongoTemplate;
 
-    // ================================================================
-    // SERVICE LAYER (embedded)
-    // ================================================================
-
-    /** Tạo ghi chú mới */
     private DiaryDto create(String userId, DiaryDto dto) {
         DiaryNote note = dto.toEntity(userId);
         DiaryNote saved = mongoTemplate.save(note);
         return DiaryDto.fromEntity(saved);
     }
 
-    /** Lấy tất cả ghi chú của user (mới nhất trước) */
     private List<DiaryDto> findAllByUserId(String userId) {
         Query query = new Query(Criteria.where("user_id").is(userId))
                 .with(Sort.by(Sort.Direction.DESC, "created_at"));
@@ -57,21 +37,12 @@ public class DiaryController {
                 .toList();
     }
 
-    /** Lấy 1 ghi chú theo id + userId */
     private Optional<DiaryNote> findByIdAndUserId(String id, String userId) {
         Query query = new Query(Criteria.where("_id").is(id)
                 .and("user_id").is(userId));
         return Optional.ofNullable(mongoTemplate.findOne(query, DiaryNote.class));
     }
 
-    // ================================================================
-    // REST ENDPOINTS
-    // ================================================================
-
-    /**
-     * POST /api/diary-notes
-     * Tạo ghi chú mới.
-     */
     @PostMapping
     public ResponseEntity<DiaryDto> create(
             @Valid @RequestBody DiaryDto dto,
@@ -83,10 +54,6 @@ public class DiaryController {
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
-    /**
-     * GET /api/diary-notes
-     * Lấy danh sách ghi chú.
-     */
     @GetMapping
     public ResponseEntity<List<DiaryDto>> getAll(
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
@@ -95,10 +62,6 @@ public class DiaryController {
         return ResponseEntity.ok(findAllByUserId(uid));
     }
 
-    /**
-     * GET /api/diary-notes/{id}
-     * Lấy chi tiết 1 ghi chú.
-     */
     @GetMapping("/{id}")
     public ResponseEntity<DiaryDto> getById(
             @PathVariable String id,
@@ -110,11 +73,6 @@ public class DiaryController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /**
-     * GET /api/diary-notes/by-time-range
-     * Lấy danh sách ghi chú trong khoảng thời gian (để overlay lên biểu đồ).
-     * Params: from (epoch ms), to (epoch ms)
-     */
     @GetMapping("/by-time-range")
     public ResponseEntity<List<DiaryDto>> getByTimeRange(
             @RequestParam long from,
@@ -139,10 +97,6 @@ public class DiaryController {
         return ResponseEntity.ok(notes);
     }
 
-    /**
-     * PUT /api/diary-notes/{id}
-     * Sửa ghi chú (chỉ cập nhật trường khác null).
-     */
     @PutMapping("/{id}")
     public ResponseEntity<DiaryDto> update(
             @PathVariable String id,
@@ -177,10 +131,6 @@ public class DiaryController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    /**
-     * DELETE /api/diary-notes/{id}
-     * Xóa ghi chú.
-     */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
             @PathVariable String id,

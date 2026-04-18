@@ -10,17 +10,6 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
 
-/**
- * Entity: Thiet bi ESP32.
- * Collection: "devices"
- *
- * Cac truong:
- *    - id          : ObjectId
- *    - userId      : ID nguoi dung
- *    - macAddress  : Dia chi MAC ESP32 (unique)
- *    - name        : Ten thiet bi
- *    - createdAt   : Thoi diem dang ky
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

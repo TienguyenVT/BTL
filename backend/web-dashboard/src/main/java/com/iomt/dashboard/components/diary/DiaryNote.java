@@ -7,52 +7,34 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
 
-/**
- * Entity: Sổ tay sức khỏe cá nhân.
- * Collection: "diary_notes"
- *
- * Các trường mới:
- *   - noteTimestamp : Mốc thời gian ghi chú đề cập (để đối chiếu biểu đồ)
- *   - alertId       : ID alert đã trigger ghi chú (nullable)
- *   - activity      : Hoạt động tại thời điểm đó
- *   - mood          : Tâm trạng
- */
 @Document(collection = "diary_notes")
 public class DiaryNote {
 
     @Id
     private String id;
 
-    /** ID người dùng sở hữu ghi chú */
     @Indexed
     @Field("user_id")
     private String userId;
 
-    /** Tiêu đề ghi chú */
     @Field("title")
     private String title;
 
-    /** Nội dung chi tiết */
     @Field("content")
     private String content;
 
-    /** Thời điểm tạo */
     @Field("created_at")
     private Instant createdAt;
 
-    /** Mốc thời gian mà ghi chú đề cập (để đối chiếu biểu đồ BPM/GSR) */
     @Field("note_timestamp")
     private Instant noteTimestamp;
 
-    /** ID alert đã trigger ghi chú (nullable) */
     @Field("alert_id")
     private String alertId;
 
-    /** Hoạt động tại thời điểm đó (ví dụ: "đang thuyết trình", "tập gym") */
     @Field("activity")
     private String activity;
 
-    /** Tâm trạng (ví dụ: "lo lắng", "bình thường", "mệt mỏi") */
     @Field("mood")
     private String mood;
 
@@ -71,7 +53,6 @@ public class DiaryNote {
         this.mood = mood;
     }
 
-    // ── Getters ──────────────────────────────────────────
     public String getId() { return id; }
     public String getUserId() { return userId; }
     public String getTitle() { return title; }
@@ -82,7 +63,6 @@ public class DiaryNote {
     public String getActivity() { return activity; }
     public String getMood() { return mood; }
 
-    // ── Setters ──────────────────────────────────────────
     public void setId(String id) { this.id = id; }
     public void setUserId(String userId) { this.userId = userId; }
     public void setTitle(String title) { this.title = title; }
@@ -93,7 +73,6 @@ public class DiaryNote {
     public void setActivity(String activity) { this.activity = activity; }
     public void setMood(String mood) { this.mood = mood; }
 
-    // ── Builder ──────────────────────────────────────────
     public static Builder builder() { return new Builder(); }
 
     public static class Builder {

@@ -12,16 +12,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.Map;
 
-/**
- * Controller: Xac thuc nguoi dung (dang ky / dang nhap).
- *
- * Base path: /api/auth
- * Auth:      Public (khong can JWT)
- *
- * ENDPOINTS:
- *    POST /api/auth/register   — Tao tai khoan moi
- *    POST /api/auth/login       — Dang nhap
- */
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -30,16 +20,9 @@ public class AuthController {
     private final MongoTemplate mongoTemplate;
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
-    // ================================================================
-    // POST /api/auth/register
-    //    Tao tai khoan moi.
-    //    Input: { email, password, name }
-    //    Output: 201 + { id, name, message } | 400 | 409
-    // ================================================================
     @PostMapping("/register")
     public ResponseEntity<AuthDto> register(@RequestBody AuthDto dto) {
 
-        // 1. Kiem tra dau vao
         if (dto.email == null || dto.email.isBlank()
                 || dto.password == null || dto.password.isBlank()
                 || dto.name == null || dto.name.isBlank()) {
@@ -48,7 +31,6 @@ public class AuthController {
             return ResponseEntity.badRequest().body(error);
         }
 
-        // 2. Kiem tra email da ton tai chua
         Query checkEmail = new Query(Criteria.where("email").is(dto.email));
         AuthEntity existing = mongoTemplate.findOne(checkEmail, AuthEntity.class);
         if (existing != null) {
@@ -57,7 +39,6 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
         }
 
-        // 3. Tao tai khoan moi
         AuthEntity newUser = new AuthEntity();
         newUser.email = dto.email;
         newUser.password = encoder.encode(dto.password);
@@ -66,7 +47,6 @@ public class AuthController {
 
         AuthEntity saved = mongoTemplate.save(newUser);
 
-        // 4. Tra ve ket qua
         AuthDto response = new AuthDto();
         response.id = saved.id;
         response.name = saved.name;
@@ -74,11 +54,6 @@ public class AuthController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    // ================================================================
-    // GET /api/auth/me
-    //    Lay thong tin tai khoan hien tai (email, name).
-    //    Output: 200 + { id, email, name } | 401
-    // ================================================================
     @GetMapping("/me")
     public ResponseEntity<AuthDto> me(
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
@@ -104,16 +79,9 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-    // ================================================================
-    // POST /api/auth/login
-    //    Dang nhap.
-    //    Input: { email, password }
-    //    Output: 200 + { id, name, message } | 401
-    // ================================================================
     @PostMapping("/login")
     public ResponseEntity<AuthDto> login(@RequestBody AuthDto dto) {
 
-        // 1. Kiem tra dau vao
         if (dto.email == null || dto.email.isBlank()
                 || dto.password == null || dto.password.isBlank()) {
             AuthDto error = new AuthDto();
@@ -121,7 +89,6 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
-        // 2. Tim tai khoan theo email
         Query findByEmail = new Query(Criteria.where("email").is(dto.email));
         AuthEntity user = mongoTemplate.findOne(findByEmail, AuthEntity.class);
         if (user == null) {
@@ -130,14 +97,12 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
-        // 3. Kiem tra mat khau bang BCrypt
         if (!encoder.matches(dto.password, user.password)) {
             AuthDto error = new AuthDto();
             error.setMessage("Mat khau khong dung");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(error);
         }
 
-        // 4. Dang nhap thanh cong
         AuthDto response = new AuthDto();
         response.id = user.id;
         response.name = user.name;
@@ -145,12 +110,6 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-    // ================================================================
-    // PUT /api/auth
-    //    Cap nhat thong tin tai khoan (name).
-    //    Input: { name, password }
-    //    Output: 200 + { id, name } | 400 | 401
-    // ================================================================
     @PutMapping
     public ResponseEntity<AuthDto> update(
             @RequestBody AuthDto dto,
@@ -204,12 +163,6 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-    // ================================================================
-    // DELETE /api/auth
-    //    Xoa tai khoan va toan bo du lieu lien quan.
-    //    Input: { password } trong body de xac nhan
-    //    Output: 200 | 400 | 401
-    // ================================================================
     @DeleteMapping
     public ResponseEntity<AuthDto> delete(
             @RequestBody AuthDto dto,

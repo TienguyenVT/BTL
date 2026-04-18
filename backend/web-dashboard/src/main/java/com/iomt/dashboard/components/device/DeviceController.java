@@ -16,18 +16,6 @@ import java.util.stream.Collectors;
 
 import org.springframework.data.mongodb.core.query.Update;
 
-/**
- * Controller: Quan ly thiet bi ESP32.
- * Nguoi dung dang ky thiet bi bang MAC Address.
- *
- * Base path: /api/devices
- *
- * ENDPOINTS:
- *    POST /api/devices          — Them thiet bi
- *    GET /api/devices           — Danh sach thiet bi
- *    PATCH /api/devices/{id}    — Doi ten thiet bi
- *    DELETE /api/devices/{id}   — Xoa thiet bi
- */
 @RestController
 @RequestMapping("/api/devices")
 @RequiredArgsConstructor
@@ -35,12 +23,6 @@ public class DeviceController {
 
     private final MongoTemplate mongoTemplate;
 
-    // ================================================================
-    // POST /api/devices
-    //    Them thiet bi moi.
-    //    Input: { macAddress, name }
-    //    Output: 201 + DeviceDto | 400 | 409
-    // ================================================================
     @PostMapping
     public ResponseEntity<DeviceDto> create(
             @RequestBody DeviceDto dto,
@@ -48,16 +30,13 @@ public class DeviceController {
 
         String uid = UserUtils.extractUserId(userId);
 
-        // 1. Kiem tra macAddress bat buoc
         if (dto.macAddress == null || dto.macAddress.isBlank()) {
             dto.message = "MAC Address la bat buoc";
             return ResponseEntity.badRequest().body(dto);
         }
 
-        // 2. Normalize MAC address
         String normalizedMac = normalizeMac(dto.macAddress);
 
-        // 3. Kiem tra MAC da ton tai chua
         Query checkMac = new Query(Criteria.where("mac_address").is(normalizedMac));
         DeviceEntity existing = mongoTemplate.findOne(checkMac, DeviceEntity.class);
         if (existing != null) {
@@ -65,7 +44,6 @@ public class DeviceController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(dto);
         }
 
-        // 4. Kiem tra MAC co trong datalake_raw khong (verify device has data)
         Query checkDatalake = new Query(
                 Criteria.where("mac_address").regex(normalizedMac, "i")
         ).limit(1);
@@ -76,7 +54,6 @@ public class DeviceController {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(dto);
         }
 
-        // 5. Tao thiet bi moi
         DeviceEntity device = new DeviceEntity();
         device.userId = uid;
         device.macAddress = normalizedMac;
@@ -85,7 +62,6 @@ public class DeviceController {
 
         DeviceEntity saved = mongoTemplate.save(device);
 
-        // 6. Tra ve ket qua
         DeviceDto response = new DeviceDto();
         response.id = saved.id;
         response.macAddress = saved.macAddress;
@@ -100,11 +76,6 @@ public class DeviceController {
         return mac.trim().toUpperCase();
     }
 
-    // ================================================================
-    // GET /api/devices
-    //    Lay danh sach thiet bi.
-    //    Output: List<DeviceDto>
-    // ================================================================
     @GetMapping
     public ResponseEntity<List<DeviceDto>> getAll(
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
@@ -124,11 +95,6 @@ public class DeviceController {
         return ResponseEntity.ok(devices);
     }
 
-    // ================================================================
-    // GET /api/devices/{id}
-    //    Lay chi tiet thiet bi.
-    //    Output: DeviceDto | 404
-    // ================================================================
     @GetMapping("/{id}")
     public ResponseEntity<DeviceDto> getById(
             @PathVariable String id,
@@ -147,12 +113,6 @@ public class DeviceController {
         return ResponseEntity.ok(toDto(device));
     }
 
-    // ================================================================
-    // PATCH /api/devices/{id}
-    //    Doi ten thiet bi.
-    //    Input: { name }
-    //    Output: DeviceDto | 400 | 404
-    // ================================================================
     @PatchMapping("/{id}")
     public ResponseEntity<DeviceDto> rename(
             @PathVariable String id,
@@ -184,11 +144,6 @@ public class DeviceController {
         return ResponseEntity.ok(response);
     }
 
-    // ================================================================
-    // DELETE /api/devices/{id}
-    //    Xoa thiet bi.
-    //    Output: 204 | 404
-    // ================================================================
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
             @PathVariable String id,
@@ -208,9 +163,6 @@ public class DeviceController {
         return ResponseEntity.noContent().build();
     }
 
-    // ================================================================
-    // Chuyen Entity -> DTO
-    // ================================================================
     private DeviceDto toDto(DeviceEntity entity) {
         return new DeviceDto(
                 entity.id,

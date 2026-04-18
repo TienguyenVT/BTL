@@ -24,19 +24,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
-/**
- * Controller: Du lieu suc khoe (Dashboard + Lich su).
- * Doc truc tiep tu MongoDB collection "final_result", tra JSON cho Frontend.
- *
- * Base path: /api/health
- *
- * ENDPOINTS:
- *    GET /api/health/latest   — Chi so moi nhat (Dashboard)
- *    GET /api/health/history  — Du lieu N gio gan day
- *    GET /api/health/recent   — N ban ghi gan nhat
- *
- * Chu y: Cac endpoint loc data theo MAC cua user da dang ky trong bang devices.
- */
 @RestController
 @RequestMapping("/api/health")
 @RequiredArgsConstructor
@@ -68,9 +55,6 @@ public class HealthController {
         }
     }
 
-    /**
-     * Lay danh sach MAC cua cac thiet bi ma user da dang ky.
-     */
     private List<String> getUserDeviceMacs(String userId) {
         if (userId == null || userId.isBlank()) {
             return List.of();
@@ -83,11 +67,6 @@ public class HealthController {
                 .toList();
     }
 
-    // ================================================================
-    // GET /api/health/latest
-    //    Lay chi so moi nhat cua user (theo MAC da dang ky).
-    //    Output: Map<String, Object> | null
-    // ================================================================
     @GetMapping("/latest")
     public ResponseEntity<Map<String, Object>> getLatest(
             @RequestHeader(value = "X-User-Id", required = false) String userId) {
@@ -131,11 +110,6 @@ public class HealthController {
         return ResponseEntity.ok(result);
     }
 
-    // ================================================================
-    // GET /api/health/history
-    //    Lay du lieu trong khoang N gio (theo MAC da dang ky).
-    //    Output: List<Map<String, Object>> (tu cu den moi)
-    // ================================================================
     @GetMapping("/history")
     public ResponseEntity<List<Map<String, Object>>> getHistory(
             @RequestHeader(value = "X-User-Id", required = false) String userId,
@@ -171,11 +145,6 @@ public class HealthController {
         return ResponseEntity.ok(docs.stream().map(this::flattenDocument).toList());
     }
 
-    // ================================================================
-    // GET /api/health/recent
-    //    Lay N ban ghi gan nhat (theo MAC da dang ky).
-    //    Output: List<Map<String, Object>>
-    // ================================================================
     @GetMapping("/recent")
     public ResponseEntity<List<Map<String, Object>>> getRecent(
             @RequestHeader(value = "X-User-Id", required = false) String userId,
@@ -208,15 +177,8 @@ public class HealthController {
         return ResponseEntity.ok(docs.stream().map(this::flattenDocument).toList());
     }
 
-    // ================================================================
-    // GET /api/health/environment
-    //    Lay du lieu moi nhat tu datalake_raw: nhiet do phong + do am.
-    //    Cap nhat realtime 1s.
-    //    Output: Map with extTempC, extHumidityPct, timestamp
-    // ================================================================
     @GetMapping("/environment")
     public Map<String, Object> getEnvironment() {
-        // Lay ban ghi moi nhat tu datalake_raw
         Query query = new Query()
                 .with(Sort.by(Sort.Direction.DESC, "ingested_at"))
                 .limit(1);
@@ -231,7 +193,6 @@ public class HealthController {
             return result;
         }
 
-        // Fields are inside "sensor" subdocument
         Document sensor = doc.get("sensor", Document.class);
         Double roomTemp = sensor != null ? toDouble(sensor.get("dht11_room_temp")) : null;
         Double humidity = sensor != null ? toDouble(sensor.get("dht11_humidity")) : null;
@@ -242,12 +203,8 @@ public class HealthController {
         return result;
     }
 
-    // ================================================================
-    // Tra ve danh sach device_id trong final_result (cho FE hien thi)
-    // ================================================================
     @GetMapping("/devices")
     public List<Map<String, Object>> getAvailableDevices() {
-        // Tra ve distinct device_ids tu final_result
         List<Document> distinct = mongoTemplate.findAll(Document.class, "final_result");
         Set<String> seen = new LinkedHashSet<>();
         List<Map<String, Object>> result = new ArrayList<>();
@@ -268,18 +225,13 @@ public class HealthController {
         return result;
     }
 
-    // ================================================================
-    // Helper: Chuyen Document thanh Map thuan tien cho FE
-    // ================================================================
     private Map<String, Object> flattenDocument(Document doc) {
         Map<String, Object> map = new LinkedHashMap<>();
 
-        // _id -> id
         if (doc.getObjectId("_id") != null) {
             map.put("id", doc.getObjectId("_id").toHexString());
         }
 
-        // Fields
         map.put("deviceId", doc.getString("device_id"));
         map.put("bpm", toDouble(doc.get("bpm")));
         map.put("spo2", toDouble(doc.get("spo2")));
@@ -288,28 +240,21 @@ public class HealthController {
         map.put("label", doc.getString("label"));
         map.put("confidence", toDouble(doc.get("confidence")));
 
-        // DHT11 fields
         map.put("extTempC", toDouble(doc.get("room_temp")));
         map.put("extHumidityPct", toDouble(doc.get("humidity")));
 
-        // Time slot
         map.put("timeSlot", doc.getString("time_slot"));
 
-        // Metadata
         map.put("source", doc.getString("source"));
         map.put("dataQuality", doc.getString("data_quality"));
         map.put("macAddress", doc.getString("mac_address"));
 
-        // ingested_at: convert to ISO-8601 string for FE to parse
         Object ingestedAt = doc.get("ingested_at");
         if (ingestedAt != null) {
-            // ingested_at is a datetime.datetime in MongoDB
-            // Convert to ISO-8601 epoch millis so FE can use new Date(timestamp)
             long epochMs = datetimeToEpochMs(ingestedAt);
             map.put("timestamp", epochMs);
             map.put("ingestedAt", ingestedAt.toString());
         } else {
-            // Fallback: try parsing the string timestamp field
             String ts = doc.getString("timestamp");
             if (ts != null && !ts.isBlank()) {
                 Long parsed = parseStringTimestamp(ts);
@@ -346,10 +291,6 @@ public class HealthController {
         }
     }
 
-    /**
-     * Convert MongoDB datetime (java.util.Date or datetime.datetime) to epoch milliseconds.
-     * This is what FE expects: new Date(epochMs) -> valid Date object.
-     */
     private long datetimeToEpochMs(Object value) {
         if (value instanceof java.util.Date date) {
             return date.getTime();
@@ -360,7 +301,6 @@ public class HealthController {
         if (value instanceof java.time.LocalDateTime ldt) {
             return ldt.toInstant(ZoneOffset.UTC).toEpochMilli();
         }
-        // Fallback: try parsing string representation
         if (value != null) {
             try {
                 return Instant.parse(value.toString()).toEpochMilli();
@@ -371,10 +311,6 @@ public class HealthController {
         return 0L;
     }
 
-    /**
-     * Parse string timestamp "yyyy:MM:dd - HH:mm:ss" to epoch milliseconds.
-     * Input example: "2026:03:31 - 15:55:20"
-     */
     private Long parseStringTimestamp(String ts) {
         try {
             LocalDateTime ldt = LocalDateTime.parse(ts, TS_PARSE_FMT);

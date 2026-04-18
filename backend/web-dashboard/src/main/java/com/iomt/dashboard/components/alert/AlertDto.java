@@ -6,9 +6,6 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 
-/**
- * DTO: Tra ve thong tin canh bao kem health snapshot.
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -20,7 +17,6 @@ public class AlertDto {
     public Instant timestamp;
     public Boolean isRead;
 
-    // ── Health snapshot fields ──
     public Double bpm;
     public Double spo2;
     public Double bodyTemp;

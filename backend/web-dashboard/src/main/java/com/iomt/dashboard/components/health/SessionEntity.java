@@ -10,26 +10,6 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
 
-/**
- * Entity: Phiên đo (Session) — nhóm các bản ghi final_result theo phiên sử dụng.
- * Collection: "sessions"
- *
- * Mỗi phiên đại diện cho một lần đo liên tục của người dùng.
- * Hai bản ghi cách nhau > 15 phút → phiên mới.
- *
- * Các trường:
- *    - sessionId    : UUID định danh phiên
- *    - startTime    : ingested_at của bản ghi đầu tiên
- *    - endTime      : ingested_at của bản ghi cuối cùng
- *    - recordCount  : số bản ghi trong phiên
- *    - label        : predicted_label chính (mode)
- *    - avgBpm       : trung bình BPM
- *    - avgSpo2      : trung bình SpO2
- *    - avgBodyTemp  : trung bình body_temp
- *    - avgGsrAdc    : trung bình gsr_adc
- *    - active       : true nếu bản ghi cuối cách hiện tại < 15 phút
- *    - updatedAt    : thời điểm cập nhật gần nhất
- */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

@@ -195,7 +195,7 @@ export default function AlertDiaryPrompt() {
             {/* Activity */}
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">
-                 Ban dang lam gi? <span className="text-red-400">*</span>
+                 Ban dang lam gi ? <span className="text-red-400">*</span>
               </label>
               <input
                 type="text"
@@ -226,7 +226,7 @@ export default function AlertDiaryPrompt() {
             </div>
 
             {/* Note */}
-            <div>
+            {/* <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">Ghi chu them</label>
               <textarea
                 value={note}
@@ -235,7 +235,7 @@ export default function AlertDiaryPrompt() {
                 rows={2}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none"
               />
-            </div>
+            </div> */}
 
             {/* Actions */}
             <div className="flex gap-2">
